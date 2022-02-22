@@ -69,10 +69,7 @@
   (match p
     [(Program info e) (Program info ((uniquify-exp '()) e))]))
 
-;;; (define (rco_atm )
-;;; )
-
-(define (atomic? e)
+(define (rco_atm e)
     (match e
         [(Var n) #t]
         [(Int n) #t]
@@ -85,30 +82,29 @@
         [(Var n) (Var n)]
         [(Int n) (Int n)]
         [(Prim 'read '()) (Prim 'read '())]
-        [(Prim op (list e1 e2)) 
+        [(Prim op (list e1 e2))
             (cond
-                [(and (atomic? e1) (atomic? e2)) e]
-                [(and (atomic? e1) (not (atomic? e2))) 
+                [(and (rco_atm e1) (rco_atm e2)) e]
+                [(and (rco_atm e1) (not (rco_atm e2))) 
                     (define var1 (gensym))
-                    (Let var1 (rco_exp e2) (Prim op (list ((Var e1) var1))))
+                    (Let var1 (rco_exp e2) (Prim op (list e1 (Var var1))))
                 ]
-                [(and (atomic? e2) (not (atomic? e1))) 
+                [(and (rco_atm e2) (not (rco_atm e1))) 
                     (define var1 (gensym))
-                    (Let var1 (rco_exp e1) (Prim op (list ((Var e2) var1))))
+                    (Let var1 (rco_exp e1) (Prim op (list e2 (Var var1))))
                 ]
-                [else 
+                [else e
                     (define var1 (gensym))
-                    (define var2 (gensym))
-                    (Let var1 (rco_exp e1) (Prim op (list ((rco_exp e2) var1))))
+                    (Let var1 (rco_exp e1) (Prim op (list (rco_exp e2) (Var var1))))
                 ]
             )
         ]
         [(Prim '- (list e1)) 
             (cond
-                [(atomic? e1) e]
+                [(rco_atm e1) e]
                 [else 
                     (define var1 (gensym))
-                    (Let var1 (rco_exp e1) (Prim '- (list (var1))))
+                    (Let var1 (rco_exp e1) (Prim '- (list (Var var1))))
                 ]
             )
         ]
@@ -119,7 +115,8 @@
 ;; remove-complex-opera* : R1 -> R1
 (define (remove-complex-opera* p)
   (match p
-    [(Program info e) (Program info (rco_exp e))]))
+    [(Program info e) 
+        (Program info (rco_exp e))]))
 
 ;; explicate-control : R1 -> C0
 (define (explicate-control p)
@@ -146,7 +143,7 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `( 
-    ;;;   ("uniquify", uniquify, interp-Lvar)
+     ("uniquify", uniquify, interp-Lvar)
      ("remove complex opera*", remove-complex-opera*, interp-Lvar)
      ;; ("explicate control" ,explicate-control ,interp-Cvar)
      ;; ("instruction selection" ,select-instructions ,interp-x86-0)
