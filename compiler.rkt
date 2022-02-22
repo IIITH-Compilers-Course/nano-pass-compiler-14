@@ -54,11 +54,13 @@
 (define (uniquify-exp env)
   (lambda (e)
     (match e
-      [(Var x)
-       (error "TODO: code goes here (uniquify-exp, symbol?)")]
+      [(Var x) (Var (dict-ref env x))]
       [(Int n) (Int n)]
       [(Let x e body)
-       (error "TODO: code goes here (uniquify-exp, let)")]
+        (define var_sampled (gensym x))
+        (define env^ (dict-set env x var_sampled))
+        (Let var_sampled ((uniquify-exp env) e) ((uniquify-exp env^) body))
+      ]
       [(Prim op es)
        (Prim op (for/list ([e es]) ((uniquify-exp env) e)))])))
 
@@ -67,9 +69,57 @@
   (match p
     [(Program info e) (Program info ((uniquify-exp '()) e))]))
 
+;;; (define (rco_atm )
+;;; )
+
+(define (atomic? e)
+    (match e
+        [(Var n) #t]
+        [(Int n) #t]
+        [_ #f]
+    )
+)
+
+(define (rco_exp e)
+    (match e
+        [(Var n) (Var n)]
+        [(Int n) (Int n)]
+        [(Prim 'read '()) (Prim 'read '())]
+        [(Prim op (list e1 e2)) 
+            (cond
+                [(and (atomic? e1) (atomic? e2)) e]
+                [(and (atomic? e1) (not (atomic? e2))) 
+                    (define var1 (gensym))
+                    (Let var1 (rco_exp e2) (Prim op (list ((Var e1) var1))))
+                ]
+                [(and (atomic? e2) (not (atomic? e1))) 
+                    (define var1 (gensym))
+                    (Let var1 (rco_exp e1) (Prim op (list ((Var e2) var1))))
+                ]
+                [else 
+                    (define var1 (gensym))
+                    (define var2 (gensym))
+                    (Let var1 (rco_exp e1) (Prim op (list ((rco_exp e2) var1))))
+                ]
+            )
+        ]
+        [(Prim '- (list e1)) 
+            (cond
+                [(atomic? e1) e]
+                [else 
+                    (define var1 (gensym))
+                    (Let var1 (rco_exp e1) (Prim '- (list (var1))))
+                ]
+            )
+        ]
+        [(Let x e body) (Let x (rco_exp e) (rco_exp body))]
+    )
+)
+
 ;; remove-complex-opera* : R1 -> R1
 (define (remove-complex-opera* p)
-  (error "TODO: code goes here (remove-complex-opera*)"))
+  (match p
+    [(Program info e) (Program info (rco_exp e))]))
 
 ;; explicate-control : R1 -> C0
 (define (explicate-control p)
@@ -95,9 +145,9 @@
 ;; Note that your compiler file (the file that defines the passes)
 ;; must be named "compiler.rkt"
 (define compiler-passes
-  `( ("uniquify" ,uniquify ,interp-Lvar)
-     ;; Uncomment the following passes as you finish them.
-     ;; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar)
+  `( 
+    ;;;   ("uniquify", uniquify, interp-Lvar)
+     ("remove complex opera*", remove-complex-opera*, interp-Lvar)
      ;; ("explicate control" ,explicate-control ,interp-Cvar)
      ;; ("instruction selection" ,select-instructions ,interp-x86-0)
      ;; ("assign homes" ,assign-homes ,interp-x86-0)
