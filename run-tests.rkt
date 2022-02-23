@@ -24,10 +24,10 @@
           (string=? r (car (string-split p "_"))))
         all-tests)))
 
-(debug-level 1)
-(interp-tests "var" #f compiler-passes interp-Lvar "var_test" (tests-for "var"))
+;;; (debug-level 1)
+;;; (interp-tests "var" #f compiler-passes interp-Lvar "var_test" (tests-for "var"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-;; (compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
+(compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
 

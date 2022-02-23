@@ -242,7 +242,13 @@
 
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
-  (error "TODO: code goes here (prelude-and-conclusion)"))
+    (match p
+        [(X86Program info es) (X86Program info `( 
+            (start . ,(dict-ref es 'start))
+            (main . ,(Block info (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) (Instr 'subq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Jmp 'start))))
+            (conclusion . ,(Block info (list (Instr 'addq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Retq))))
+        ))
+]))
 
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -255,5 +261,5 @@
      ("instruction selection", select-instructions, interp-x86-0)
      ("assign homes", assign-homes, interp-x86-0)
      ("patch instructions", patch-instructions, interp-x86-0)
-     ;; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
