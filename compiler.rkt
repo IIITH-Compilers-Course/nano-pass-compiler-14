@@ -5,6 +5,8 @@
 (require "interp-Lint.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
+(require "type-check-Lvar.rkt")
+(require "type-check-Cvar.rkt")
 (require "utilities.rkt")
 (provide (all-defined-out))
 
@@ -193,9 +195,32 @@
     [(CProgram info e) 
         (X86Program info `((start . ,(Block info (select-instructions-statement (dict-ref e 'start))))))]))
 
+(define (assign-homes-map vars [offset -8] [varmap '()])
+    (match vars
+        ['() varmap]
+        [(cons a c) (assign-homes-map c (- offset 8) (dict-set varmap (car a) offset))]
+    )   
+)
+
+(define (assign-homes-convert e varmap)
+    (match e
+        [(Var e) (Deref 'rbp (dict-ref varmap e))]
+        [_ e]
+    )
+)
+
+(define (assign-homes-mapvars varmap stm)
+    (match stm
+        [(Instr op args) (Instr op (map (lambda (x) (assign-homes-convert x varmap)) args))]
+        [(Block info body) (Block info (for/list ([nxt body]) (assign-homes-mapvars varmap nxt)))] 
+        [_ stm]
+    )
+)
+
 ;; assign-homes : pseudo-x86 -> pseudo-x86
 (define (assign-homes p)
-  (error "TODO: code goes here (assign-homes)"))
+  (match p
+    [(X86Program info e) (X86Program info (for/list ([curr e]) (cons (car curr) (assign-homes-mapvars (assign-homes-map (dict-ref info 'locals-types)) (cdr curr)))))]))
 
 ;; patch-instructions : psuedo-x86 -> x86
 (define (patch-instructions p)
@@ -210,11 +235,11 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `( 
-     ("uniquify", uniquify, interp-Lvar)
-     ("remove complex opera*", remove-complex-opera*, interp-Lvar)
-     ("explicate control", explicate_control, interp-Cvar)
-     ("instruction selection" ,select-instructions ,interp-x86-0)
-     ;; ("assign homes" ,assign-homes ,interp-x86-0)
+     ("uniquify", uniquify, interp-Lvar, type-check-Lvar)
+     ("remove complex opera*", remove-complex-opera*, interp-Lvar, type-check-Lvar)
+     ("explicate control", explicate_control, interp-Cvar, type-check-Cvar)
+     ("instruction selection", select-instructions, interp-x86-0)
+     ("assign homes", assign-homes, interp-x86-0)
      ;; ("patch instructions" ,patch-instructions ,interp-x86-0)
      ;; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
