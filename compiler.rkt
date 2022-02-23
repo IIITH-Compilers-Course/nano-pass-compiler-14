@@ -220,7 +220,7 @@
 ;; assign-homes : pseudo-x86 -> pseudo-x86
 (define (assign-homes p)
   (match p
-    [(X86Program info e) (X86Program info (map (lambda (x) `(,(car x) . ,(assign-homes-mapvars (assign-homes-map (dict-ref info 'locals-types)) (cdr x)))) e))]))
+    [(X86Program info e) (X86Program (dict-set info 'stack-space (* 8 (length (dict-ref info 'locals-types))) ) (map (lambda (x) `(,(car x) . ,(assign-homes-mapvars (assign-homes-map (dict-ref info 'locals-types)) (cdr x)))) e))]))
 
 (define (patch-instructions-convert stm)
     (match stm
