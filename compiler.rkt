@@ -220,7 +220,7 @@
 ;; assign-homes : pseudo-x86 -> pseudo-x86
 (define (assign-homes p)
   (match p
-    [(X86Program info e) (X86Program info (for/list ([curr e]) (cons (car curr) (assign-homes-mapvars (assign-homes-map (dict-ref info 'locals-types)) (cdr curr)))))]))
+    [(X86Program info e) (X86Program info (map (lambda (x) `(,(car x) . ,(assign-homes-mapvars (assign-homes-map (dict-ref info 'locals-types)) (cdr x)))) e))]))
 
 (define (patch-instructions-convert stm)
     (match stm
@@ -240,12 +240,6 @@
   (match p
     [(X86Program info es) (X86Program info (map (lambda (x) `(,(car x) . ,(patch-instructions-convert (cdr x)))) es))]))
 
-
-;;; (define (patch-instructions p)
-;;;    (match p
-;;;     [(Program info (CFG B-list))
-;;;       ]))
-
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
   (error "TODO: code goes here (prelude-and-conclusion)"))
@@ -260,6 +254,6 @@
      ("explicate control", explicate_control, interp-Cvar, type-check-Cvar)
      ("instruction selection", select-instructions, interp-x86-0)
      ("assign homes", assign-homes, interp-x86-0)
-     ("patch instructions" ,patch-instructions ,interp-x86-0)
+     ("patch instructions", patch-instructions, interp-x86-0)
      ;; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
