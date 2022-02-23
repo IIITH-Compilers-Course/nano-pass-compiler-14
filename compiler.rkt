@@ -1,8 +1,10 @@
 #lang racket
 (require racket/set racket/stream)
 (require racket/fixnum)
+(require "interp.rkt")
 (require "interp-Lint.rkt")
 (require "interp-Lvar.rkt")
+(require "interp-Cvar.rkt")
 (require "utilities.rkt")
 (provide (all-defined-out))
 
@@ -118,13 +120,78 @@
     [(Program info e) 
         (Program info (rco_exp e))]))
 
+(define (explicate_tail e)
+    (match e
+        [(Var x) (Return (Var x))]
+        [(Int n) (Return (Int n))]
+        [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
+        [(Prim op es) (Return (Prim op es))]
+        [else (error "explicate_tail unhandled case" e)]))
+
+(define (explicate_assign e x cont)
+    (match e
+        [(Var xvar) (Seq (Assign (Var x) (Var xvar)) cont)]
+        [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
+        [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
+        [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
+        [else (error "explicate_assign unhandled case" e)]))
+
 ;; explicate-control : R1 -> C0
-(define (explicate-control p)
-  (error "TODO: code goes here (explicate-control)"))
+(define (explicate_control p)
+    (match p
+    [(Program info body) (CProgram info (list (cons 'start (explicate_tail body))))]))
+
+(define (select-instructions-atomic e)
+    (match e
+        [(Int n) (Imm n)]
+        [(Var n) (Var n)]
+    )
+)
+
+(define (select-instructions-statement stm)
+    (match stm
+        ['() '()]
+        [(Seq (Assign var exp) t*) (append (select-instructions-assignment exp var) (select-instructions-statement t*))]
+        [(Return exp) (append (select-instructions-assignment exp (Reg 'rax)) (list (Jmp 'conclusion)))]
+    )
+)
+
+(define (select-instructions-assignment e x)
+    (match e
+        [(Int i) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
+        [(Var v) (list (Instr 'movq (list e x)))]
+        [(Prim '+ (list e1 e2))
+            (cond 
+              [(equal? x e1) (list (Instr 'addq (list (select-instructions-atomic e2) x)))]
+              [(equal? x e2) (list (Instr 'addq (list (select-instructions-atomic e1) x)))]
+              [else (list (Instr 'movq (list (select-instructions-atomic e1) x))
+                          (Instr 'addq (list (select-instructions-atomic e2) x)))]
+            )
+        ]
+        [(Prim '- (list e1 e2))
+            (cond 
+                [(equal? x e1) (list (Instr 'subq (list (select-instructions-atomic e2) x)))]
+                [(equal? x e2) (list (Instr 'subq (list (select-instructions-atomic e1) x)))]
+                [else (list (Instr 'movq (list (select-instructions-atomic e1) x))
+                      (Instr 'subq (list x (select-instructions-atomic e2))))]
+            )
+        ]
+        [(Prim '- (list e1))
+            (list (Instr 'movq (list (select-instructions-atomic e1) x))
+                  (Instr 'negq (list x)))
+        ]
+        [(Prim 'read '()) 
+            (list (Callq 'read_int)
+                  (Instr 'movq (list (Reg 'rax) x)))
+        ]
+    )
+)
 
 ;; select-instructions : C0 -> pseudo-x86
 (define (select-instructions p)
-  (error "TODO: code goes here (select-instructions)"))
+  (match p
+    [(CProgram info e) 
+        (X86Program info `((start . ,(Block info (select-instructions-statement (dict-ref e 'start))))))]))
 
 ;; assign-homes : pseudo-x86 -> pseudo-x86
 (define (assign-homes p)
@@ -145,10 +212,9 @@
   `( 
      ("uniquify", uniquify, interp-Lvar)
      ("remove complex opera*", remove-complex-opera*, interp-Lvar)
-     ;; ("explicate control" ,explicate-control ,interp-Cvar)
-     ;; ("instruction selection" ,select-instructions ,interp-x86-0)
+     ("explicate control", explicate_control, interp-Cvar)
+     ("instruction selection" ,select-instructions ,interp-x86-0)
      ;; ("assign homes" ,assign-homes ,interp-x86-0)
      ;; ("patch instructions" ,patch-instructions ,interp-x86-0)
      ;; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
-
