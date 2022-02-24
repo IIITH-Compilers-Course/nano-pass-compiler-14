@@ -183,7 +183,8 @@
                   (Instr 'negq (list x)))
         ]
         [(Prim 'read '()) 
-            (list (Callq 'read_int)
+            ;;; default argument of Callq
+            (list (Callq 'read_int 0)  
                   (Instr 'movq (list (Reg 'rax) x)))
         ]
     )
