@@ -99,7 +99,10 @@
                 ]
                 [else e
                     (define var1 (gensym))
-                    (Let var1 (rco_exp e1) (Prim op (list (rco_exp e2) (Var var1))))
+                    (define var2 (gensym))
+                    (Let var1 (rco_exp e1) (
+                        Let var2 (rco_exp e2) (Prim op (list (Var var1) (Var var2)))
+                    ))
                 ]
             )
         ]
