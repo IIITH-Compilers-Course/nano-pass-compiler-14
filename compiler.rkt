@@ -43,9 +43,13 @@
 (define (pe-exp e)
   (match e
     [(Int n) (Int n)]
+    [(Var v) (Var v)]
     [(Prim 'read '()) (Prim 'read '())]
     [(Prim '- (list e1)) (pe-neg (pe-exp e1))]
-    [(Prim '+ (list e1 e2)) (pe-add (pe-exp e1) (pe-exp e2))]))
+    [(Prim '+ (list e1 e2)) (pe-add (pe-exp e1) (pe-exp e2))]
+    [(Let var e1 e2) (Let var (pe-exp e1) (pe-exp e2))]
+))
+
 
 (define (pe-Lint p)
   (match p
@@ -259,6 +263,7 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `( 
+     ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
      ("uniquify", uniquify, interp-Lvar, type-check-Lvar)
      ("remove complex opera*", remove-complex-opera*, interp-Lvar, type-check-Lvar)
      ("explicate control", explicate_control, interp-Cvar, type-check-Cvar)
