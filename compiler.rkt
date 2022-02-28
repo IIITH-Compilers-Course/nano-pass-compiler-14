@@ -249,8 +249,8 @@
     (match p
         [(X86Program info es) (X86Program info `( 
             (start . ,(dict-ref es 'start))
-            (main . ,(Block info (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) (Instr 'subq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Jmp 'start))))
-            (conclusion . ,(Block info (list (Instr 'addq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Retq))))
+            (main . ,(Block info (list (Instr 'pushq (list (Reg 'rbp))) (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) (Instr 'subq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Jmp 'start))))
+            (conclusion . ,(Block info (list (Instr 'addq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Instr 'popq (list (Reg 'rbp))) (Retq))))
         ))
 ]))
 
