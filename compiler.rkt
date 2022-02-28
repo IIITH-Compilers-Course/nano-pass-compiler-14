@@ -61,9 +61,9 @@
       [(Var x) (Var (dict-ref env x))]
       [(Int n) (Int n)]
       [(Let x e body)
-        (define var_sampled (gensym x))
-        (define env^ (dict-set env x var_sampled))
-        (Let var_sampled ((uniquify-exp env) e) ((uniquify-exp env^) body))
+        (define var1 (gensym x))
+        (define env^ (dict-set env x var1))
+        (Let var1 ((uniquify-exp env) e) ((uniquify-exp env^) body))
       ]
       [(Prim op es)
        (Prim op (for/list ([e es]) ((uniquify-exp env) e)))])))
