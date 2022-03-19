@@ -1,6 +1,7 @@
 #lang racket
 (require racket/set racket/stream)
 (require racket/fixnum)
+(require graph)
 (require "interp.rkt")
 (require "interp-Lint.rkt")
 (require "interp-Lvar.rkt")
@@ -258,6 +259,105 @@
         ))
 ]))
 
+(define (check-int e)
+    (if (not (Imm? e) ) #t #f)
+)
+
+(define (list-to-set lst)
+    (list->set (for/list ([e lst] #:when (check-int e)) e))  
+)
+
+
+(define (extract-reads instr)
+    (
+        match instr
+        [(Instr 'movq es) (list-to-set (list (car es))) ]
+        [(Instr 'addq es) (list-to-set es)]
+        [(Instr 'subq es) (list-to-set es)]
+        [(Instr 'negq es) (list-to-set es)]
+        [(Jmp _) (set (Reg 'rax) (Reg 'rsp))]
+        [_ (set)]
+    )
+)
+
+(define (extract-writes instr)
+    (
+        match instr
+        [(Instr 'movq es) (list->set (cdr es))]
+        [(Instr 'addq es) (list->set (cdr es))]
+        [(Instr 'subq es) (list->set (cdr es))]
+        [(Instr 'negq es) (list->set es)]
+        [_ (set)]
+    )
+)
+
+;; auxiliary function that takes a list of instructions and an initial live-after set (typically empty) and returns the list of live-after sets
+(define (get-live-after listOfInstructions)
+    (
+        match listOfInstructions
+        [(list a) (list (extract-reads a ) ) ] 
+        [_ (let ([list-live-after (get-live-after (cdr listOfInstructions))])
+            (append
+                (list
+                    (set-union (extract-reads (car listOfInstructions)) 
+                        (set-subtract (car list-live-after)  
+                            (extract-writes (car listOfInstructions)) 
+                        )
+                    )
+                )
+                list-live-after
+            ))
+        ]
+    )
+)
+
+;; uncover_live 
+(define (uncover-live p)
+    (
+        match p
+        [(X86Program info body) (X86Program info (for/list ([func body]) (cons (car func) (match (cdr func) [(Block info bbody) (Block (dict-set info 'live-after (get-live-after bbody)) bbody)]))))]
+    )
+) 
+
+(define (add-edges d curInstr curLive interference-graph)
+    (for ([v curLive]) 
+        (when (not (eq? v d)) 
+            (match curInstr
+                [(Instr 'movq (list src dest)) (when (not (eq? src v)) (add-edge! interference-graph v d))]
+                [_ (add-edge! interference-graph v d)]
+            )
+        )
+    )
+    interference-graph
+)
+
+(define (set-to-list s) 
+    (for/list ([e s]) e)
+)
+
+(define (build-graph list-live-after listOfInstructions [interference-graph (undirected-graph '()) ]) 
+    (match listOfInstructions
+        ['() 
+        (print-graph interference-graph)
+        interference-graph]
+        [_ 
+            (define curInstr (car listOfInstructions))
+            (define curWrite (set-to-list (extract-writes curInstr)) )
+            (define curLive (car list-live-after))
+            
+            (match curWrite 
+                ['() (build-graph (cdr list-live-after) (cdr listOfInstructions) interference-graph )]
+                [(list a) (build-graph (cdr list-live-after) (cdr listOfInstructions) (add-edges a curInstr curLive interference-graph) )]
+            )
+         ])
+)
+
+(define (build-interference p)
+  (match p
+    [(X86Program info body) (X86Program info (for/list ([func body]) (cons (car func) (match (cdr func) [(Block info bbody) (Block (append info (cons 'conflicts (build-graph (dict-ref info 'live-after) bbody (undirected-graph '())))) bbody)]))))]
+  )    
+)
+
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
 ;; must be named "compiler.rkt"
@@ -268,6 +368,8 @@
      ("remove complex opera*", remove-complex-opera*, interp-Lvar, type-check-Lvar)
      ("explicate control", explicate_control, interp-Cvar, type-check-Cvar)
      ("instruction selection", select-instructions, interp-x86-0)
+     ("uncover live", uncover-live, interp-x86-0)
+     ("interference graph", build-interference, interp-x86-0)
      ("assign homes", assign-homes, interp-x86-0)
      ("patch instructions", patch-instructions, interp-x86-0)
      ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
