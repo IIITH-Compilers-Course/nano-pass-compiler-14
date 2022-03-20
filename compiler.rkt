@@ -267,10 +267,8 @@
     (list->set (for/list ([e lst] #:when (check-int e)) e))  
 )
 
-
 (define (extract-reads instr)
-    (
-        match instr
+    (match instr
         [(Instr 'movq es) (list-to-set (list (car es))) ]
         [(Instr 'addq es) (list-to-set es)]
         [(Instr 'subq es) (list-to-set es)]
@@ -281,8 +279,7 @@
 )
 
 (define (extract-writes instr)
-    (
-        match instr
+    (match instr
         [(Instr 'movq es) (list->set (cdr es))]
         [(Instr 'addq es) (list->set (cdr es))]
         [(Instr 'subq es) (list->set (cdr es))]
@@ -291,30 +288,24 @@
     )
 )
 
-;; auxiliary function that takes a list of instructions and an initial live-after set (typically empty) and returns the list of live-after sets
 (define (get-live-after listOfInstructions)
-    (
-        match listOfInstructions
-        [(list a) (list (extract-reads a ) ) ] 
+    (match listOfInstructions
+        [(list a) (list (extract-reads a))] 
         [_ (let ([list-live-after (get-live-after (cdr listOfInstructions))])
-            (append
-                (list
-                    (set-union (extract-reads (car listOfInstructions)) 
+            (append (list
+                    (set-union (extract-reads (car listOfInstructions))
                         (set-subtract (car list-live-after)  
                             (extract-writes (car listOfInstructions)) 
                         )
                     )
                 )
-                list-live-after
-            ))
+            list-live-after))
         ]
     )
 )
 
-;; uncover_live 
 (define (uncover-live p)
-    (
-        match p
+    (match p
         [(X86Program info body) (X86Program info (for/list ([func body]) (cons (car func) (match (cdr func) [(Block info bbody) (Block (dict-set info 'live-after (get-live-after bbody)) bbody)]))))]
     )
 ) 
@@ -337,11 +328,8 @@
 
 (define (build-graph list-live-after listOfInstructions [interference-graph (undirected-graph '()) ]) 
     (match listOfInstructions
-        ['() 
-        (print-graph interference-graph)
-        interference-graph]
-        [_ 
-            (define curInstr (car listOfInstructions))
+        ['() interference-graph]
+        [_  (define curInstr (car listOfInstructions))
             (define curWrite (set-to-list (extract-writes curInstr)) )
             (define curLive (car list-live-after))
             
@@ -349,7 +337,8 @@
                 ['() (build-graph (cdr list-live-after) (cdr listOfInstructions) interference-graph )]
                 [(list a) (build-graph (cdr list-live-after) (cdr listOfInstructions) (add-edges a curInstr curLive interference-graph) )]
             )
-         ])
+        ]
+    )
 )
 
 (define (build-interference p)
