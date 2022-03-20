@@ -9,6 +9,7 @@
 (require "type-check-Lvar.rkt")
 (require "type-check-Cvar.rkt")
 (require "utilities.rkt")
+(require "graph-printing.rkt")
 (provide (all-defined-out))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -306,9 +307,14 @@
 
 (define (uncover-live p)
     (match p
-        [(X86Program info body) (X86Program info (for/list ([func body]) (cons (car func) (match (cdr func) [(Block info bbody) (Block (dict-set info 'live-after (get-live-after bbody)) bbody)]))))]
+        [(X86Program info body)
+            (match body
+                [`((start . ,(Block sinfo instrs)))
+                    (X86Program info `((start . ,(Block (dict-set sinfo 'live-after (get-live-after instrs)) instrs))))]
+            )
+        ]
     )
-) 
+)
 
 (define (add-edges d curInstr curLive interference-graph)
     (for ([v curLive]) 
@@ -326,7 +332,7 @@
     (for/list ([e s]) e)
 )
 
-(define (build-graph list-live-after listOfInstructions [interference-graph (undirected-graph '()) ]) 
+(define (build-graph list-live-after listOfInstructions [interference-graph (undirected-graph '())]) 
     (match listOfInstructions
         ['() interference-graph]
         [_  (define curInstr (car listOfInstructions))
@@ -342,9 +348,21 @@
 )
 
 (define (build-interference p)
-  (match p
-    [(X86Program info body) (X86Program info (for/list ([func body]) (cons (car func) (match (cdr func) [(Block info bbody) (Block (append info (cons 'conflicts (build-graph (dict-ref info 'live-after) bbody (undirected-graph '())))) bbody)]))))]
-  )    
+    (match p
+        [(X86Program info body)
+            (match body
+                [`((start . ,(Block sinfo instrs)))
+                (X86Program (dict-set info 'conflicts (build-graph (dict-ref sinfo 'live-after) instrs)) `((start . ,(Block sinfo instrs))))])
+        ]
+    )
+)
+
+(define (allocate-registers p)
+    (match p
+        [(X86Program info body) 
+        (print-dot (dict-ref info 'conflicts) "testGraph.txt")
+        (X86Program info body)]
+    )
 )
 
 ;; Define the compiler passes to be used by interp-tests and the grader
@@ -359,6 +377,7 @@
      ("instruction selection", select-instructions, interp-x86-0)
      ("uncover live", uncover-live, interp-x86-0)
      ("interference graph", build-interference, interp-x86-0)
+     ("allocate registers", allocate-registers, interp-x86-0)
      ("assign homes", assign-homes, interp-x86-0)
      ("patch instructions", patch-instructions, interp-x86-0)
      ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
