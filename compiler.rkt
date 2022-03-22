@@ -10,6 +10,7 @@
 (require "type-check-Cvar.rkt")
 (require "utilities.rkt")
 (require "graph-printing.rkt")
+(require "./priority_queue.rkt")
 (provide (all-defined-out))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -357,8 +358,36 @@
     )
 )
 
+(struct node (name [blocked-colors-set #:mutable]))
+
+(define cmp-<                 
+  (lambda (node1 node2)         
+    (< (length (node-blocked-colors-set node1)) (length (node-blocked-colors-set node2)) ))
+)
+
+
+(define (assign-next q vname-pointer) 
+    (cond 
+        [(eq? (pqueue-count q) 0) ()]
+        [else (assign-next )]
+    )
+)
+
+(define (allocate-registers-helper variableList) 
+    (define q (make-pqueue cmp-<))
+    (define vname-pointer '())
+    (for ([v variableList]) (
+        (define node (pqueue-push! q (node v (set))))
+        (dict-set vname-pointer v node))
+    )
+    (assign-next q vname-pointer)
+)
+
+
+
 (define (allocate-registers p)
     (match p
+;;;  (dict-ref info 'locals-types)
         [(X86Program info body)
             (match body
                 [`((start . ,(Block sinfo instrs)))
