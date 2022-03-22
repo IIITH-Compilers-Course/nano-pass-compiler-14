@@ -346,6 +346,27 @@
   )
 )
 
+(define (register-to-color reg)
+  (match reg
+    [(Reg 'rcx) 1]
+    [(Reg 'rdx) 2]
+    [(Reg 'rsi) 3]
+    [(Reg 'rdi) 4]
+    [(Reg 'r8) 5]
+    [(Reg 'r9) 6]
+    [(Reg 'r10) 7]
+    [(Reg 'r11) 8]
+    [(Reg 'rbx) 9]
+    [(Reg 'r12) 10]
+    [(Reg 'r13) 11]
+    [(Reg 'r14) 12]
+    [(Reg 'rax) -1]
+    [(Reg 'rsp) -2]
+    [(Reg 'rbp) -3]
+    [(Reg 'r15) -4]
+  )
+)
+
 (struct node (name [blockedColorsSet #:mutable]))
 
 (define cmp-<                 
@@ -387,13 +408,19 @@
     )
 )
 
-(define (allocate-registers-helper variableList graph [vname-pointer '()] [q (make-pqueue cmp-<)] ) 
+(define (allocate-registers-helper variableList graph [vname-pointer '()] [q (make-pqueue cmp-<)] [registerList '()]) 
     (match variableList
-        ['() (assign-next q vname-pointer graph)]
+        ['()
+            (for ([rg registerList]) (update-neighbours q vname-pointer (register-to-color rg) (sequence->list (in-neighbors graph rg)))) 
+            (assign-next q vname-pointer graph)]
         [_ 
             (define curVar (car variableList))
-            (allocate-registers-helper (cdr variableList) graph 
-                (dict-set vname-pointer curVar (pqueue-push! q (node curVar (set)))) q) 
+            (match curVar
+                [(Reg _) (allocate-registers-helper (cdr variableList) graph 
+                    (dict-set vname-pointer curVar (pqueue-push! q (node curVar (set)))) q (cons curVar registerList))] 
+                [_ (allocate-registers-helper (cdr variableList) graph 
+                (dict-set vname-pointer curVar (pqueue-push! q (node curVar (set)))) q registerList)]
+            )
         ]
     )
 )
@@ -409,7 +436,7 @@
                 (display "\n")
                 (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
                 (displayln varColors)
-                (X86Program (dict-set info 'stack-space (* 8 (length (dict-ref info 'locals-types))) ) `((start . ,(Block sinfo (assign-homes instrs varColors)))))])
+                (X86Program info `((start . ,(Block sinfo (assign-homes instrs varColors)))))])
         ]
     )
 )
@@ -456,6 +483,6 @@
      ("interference graph", build-interference, interp-x86-0)
      ("allocate registers", allocate-registers, interp-x86-0)
     ;;;  ("assign homes", assign-homes, interp-x86-0)
-     ("patch instructions", patch-instructions, interp-x86-0)
-     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
+    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
