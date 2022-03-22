@@ -372,12 +372,13 @@
     )
 )
 
-(define (update-neighbours graph curNode q curColor)
+(define (update-neighbours graph curNode q vname-pointer curColor)
     (for ([v (in-neighbors graph curNode-name)]) (
-        (define node (pqueue-push! q (node v (set))))
-        (dict-set vname-pointer v node))
+       (define curNeighbour (dict-ref vname-pointer v))
+       (define newSet (list->set (append (curColor) (set-to-list curNeighbour-blockedColorsSet) )))
+       (set-node-blockedColorsSet! curNeighbour newSet)        
     )
-     
+    q     
 )
 
 (define (assign-next q vname-pointer [var-colors '()] graph) 
@@ -386,8 +387,8 @@
         [else (
             (define curNode (pqueue-pop! q))
             (define curColor (mex (set-set-to-list (node-blockedColorsSet curNode)) )
-            (dict-set var-colors curNode-name curColor)
-            (update-neighbours graph curNode q vname-pointer curColor)
+            (define updatedQ (update-neighbours graph curNode q vname-pointer curColor))
+            (assign-next updatedQ vname-pointer (dict-set var-colors curNode-name curColor))
         )]
     )
 )
