@@ -373,23 +373,23 @@
 )
 
 (define (update-neighbours graph curNode q vname-pointer curColor)
-    (for ([v (in-neighbors graph curNode-name)]) (
-       (define curNeighbour (dict-ref vname-pointer v))
-       (define newSet (list->set (append (curColor) (set-to-list curNeighbour-blockedColorsSet) )))
-       (set-node-blockedColorsSet! curNeighbour newSet)        
-    )
+    (for ([v (in-neighbors graph (node-name curNode) )]) (
+    ;;;    (define curNeighbour (dict-ref vname-pointer v))
+    ;;;    (define newSet (list->set (append (curColor) (set-to-list (node-blockedColorsSet  (dict-ref vname-pointer v)) ) )))
+       (set-node-blockedColorsSet!  (dict-ref vname-pointer v) (list->set (append (curColor) (set-to-list (node-blockedColorsSet  (dict-ref vname-pointer v)) ) )))        
+    ))
     q     
 )
 
-(define (assign-next q vname-pointer [var-colors '()] graph) 
+(define (assign-next q vname-pointer graph [var-colors '()] ) 
     (cond 
         [(eq? (pqueue-count q) 0) var-colors]
-        [else (
+        [else 
             (define curNode (pqueue-pop! q))
-            (define curColor (mex (set-set-to-list (node-blockedColorsSet curNode)) )
+            (define curColor (mex (set-to-list (node-blockedColorsSet curNode)) ))
             (define updatedQ (update-neighbours graph curNode q vname-pointer curColor))
-            (assign-next updatedQ vname-pointer (dict-set var-colors curNode-name curColor))
-        )]
+            (assign-next updatedQ vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
+        ]
     )
 )
 
@@ -397,10 +397,16 @@
     (define q (make-pqueue cmp-<))
     (define vname-pointer '())
     (for ([v variableList]) (
-        (define node (pqueue-push! q (node v (set))))
-        (dict-set vname-pointer v node))
-    )
-    (assign-next q vname-pointer graph)
+        (display "\n")
+        (display "\n")
+        (display (car v))
+        (display "\n")
+        (display "\n")
+        ;;; (define node (pqueue-push! q (node (car v) (set))))
+        ;;; (dict-set vname-pointer (car v) (pqueue-push! q (node (car v) (set))))
+    ))
+    variableList    
+    ;;; (assign-next q vname-pointer graph)
 )
 
 (define (allocate-registers p)
