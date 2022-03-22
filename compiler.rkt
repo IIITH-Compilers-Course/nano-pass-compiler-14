@@ -369,7 +369,7 @@
 (define (assign-next q vname-pointer) 
     (cond 
         [(eq? (pqueue-count q) 0) ()]
-        [else (assign-next )]
+        [else (assign-next  )]
     )
 )
 
