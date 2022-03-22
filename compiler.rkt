@@ -359,9 +359,11 @@
 
 (define (allocate-registers p)
     (match p
-        [(X86Program info body) 
-        (print-dot (dict-ref info 'conflicts) "testGraph.txt")
-        (X86Program info body)]
+        [(X86Program info body)
+            (match body
+                [`((start . ,(Block sinfo instrs)))
+                (X86Program info `((start . ,(Block sinfo instrs))))])
+        ]
     )
 )
 
