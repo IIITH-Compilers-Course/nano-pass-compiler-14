@@ -206,16 +206,15 @@
     [(CProgram info e) 
         (X86Program info `((start . ,(Block info (select-instructions-statement (dict-ref e 'start))))))]))
 
-(define (assign-homes-map vars [offset -8] [varmap '()])
-    (match vars
-        ['() varmap]
-        [(cons a c) (assign-homes-map c (- offset 8) (dict-set varmap (car a) offset))]
-    )   
-)
-
 (define (assign-homes-convert e varmap)
     (match e
-        [(Var e) (Deref 'rbp (dict-ref varmap e))]
+        [(Var e) 
+            (define color (dict-ref varmap (Var e)))
+            (cond
+                [(< color 12) (color-to-register color)]
+                [else (Deref 'rbp (* 8 (- 11 color)) )]
+            )
+        ]
         [_ e]
     )
 )
@@ -223,43 +222,15 @@
 (define (assign-homes-mapvars varmap stm)
     (match stm
         [(Instr op args) (Instr op (map (lambda (x) (assign-homes-convert x varmap)) args))]
-        [(Block info body) (Block info (for/list ([nxt body]) (assign-homes-mapvars varmap nxt)))] 
         [_ stm]
     )
 )
 
 ;; assign-homes : pseudo-x86 -> pseudo-x86
-(define (assign-homes p)
-  (match p
-    [(X86Program info e) (X86Program (dict-set info 'stack-space (* 8 (length (dict-ref info 'locals-types))) ) (map (lambda (x) `(,(car x) . ,(assign-homes-mapvars (assign-homes-map (dict-ref info 'locals-types)) (cdr x)))) e))]))
-
-(define (patch-instructions-convert stm)
-    (match stm
-        [(Instr op (list (Deref 'rbp offset_1) (Deref 'rbp offset_2))) 
-            (list
-                (Instr 'movq (list (Deref 'rbp offset_1) (Reg 'rax)))
-                (Instr op (list (Reg 'rax) (Deref 'rbp offset_2)))
-            )
-        ]
-        [(Block info body) (Block info (append-map patch-instructions-convert body))] 
-        [_ (list stm)]
-    )
+(define (assign-homes instrs varmap)
+    (for/list ([stm instrs]) (assign-homes-mapvars varmap stm))
 )
 
-;; patch-instructions : psuedo-x86 -> x86
-(define (patch-instructions p)
-  (match p
-    [(X86Program info es) (X86Program info (map (lambda (x) `(,(car x) . ,(patch-instructions-convert (cdr x)))) es))]))
-
-;; prelude-and-conclusion : x86 -> x86
-(define (prelude-and-conclusion p)
-    (match p
-        [(X86Program info es) (X86Program info `( 
-            (start . ,(dict-ref es 'start))
-            (main . ,(Block info (list (Instr 'pushq (list (Reg 'rbp))) (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) (Instr 'subq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Jmp 'start))))
-            (conclusion . ,(Block info (list (Instr 'addq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Instr 'popq (list (Reg 'rbp))) (Retq))))
-        ))
-]))
 
 (define (check-int e)
     (if (not (Imm? e) ) #t #f)
@@ -358,6 +329,23 @@
     )
 )
 
+(define (color-to-register color)
+  (match color
+    [0 (Reg 'rcx)]
+    [1 (Reg 'rdx)]
+    [2 (Reg 'rsi)]
+    [3 (Reg 'rdi)]
+    [4 (Reg 'r8)]
+    [5 (Reg 'r9)]
+    [6 (Reg 'r10)]
+    [7 (Reg 'r11)]
+    [8 (Reg 'rbx)]
+    [9 (Reg 'r12)]
+    [11 (Reg 'r13)]
+    [12 (Reg 'r14)]
+  )
+)
+
 (struct node (name [blockedColorsSet #:mutable]))
 
 (define cmp-<                 
@@ -419,12 +407,40 @@
                 (define graph (dict-ref info 'conflicts))
                 (display "lauda lasan")
                 (display "\n")
-                (display (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
-                (display "\n")
-                (X86Program info `((start . ,(Block sinfo instrs))))])
+                (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
+                (displayln varColors)
+                (X86Program (dict-set info 'stack-space (* 8 (length (dict-ref info 'locals-types))) ) `((start . ,(Block sinfo (assign-homes instrs varColors)))))])
         ]
     )
 )
+
+(define (patch-instructions-convert stm)
+    (match stm
+        [(Instr op (list (Deref 'rbp offset_1) (Deref 'rbp offset_2))) 
+            (list
+                (Instr 'movq (list (Deref 'rbp offset_1) (Reg 'rax)))
+                (Instr op (list (Reg 'rax) (Deref 'rbp offset_2)))
+            )
+        ]
+        [(Block info body) (Block info (append-map patch-instructions-convert body))] 
+        [_ (list stm)]
+    )
+)
+
+;; patch-instructions : psuedo-x86 -> x86
+(define (patch-instructions p)
+  (match p
+    [(X86Program info es) (X86Program info (map (lambda (x) `(,(car x) . ,(patch-instructions-convert (cdr x)))) es))]))
+
+;; prelude-and-conclusion : x86 -> x86
+(define (prelude-and-conclusion p)
+    (match p
+        [(X86Program info es) (X86Program info `( 
+            (start . ,(dict-ref es 'start))
+            (main . ,(Block info (list (Instr 'pushq (list (Reg 'rbp))) (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) (Instr 'subq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Jmp 'start))))
+            (conclusion . ,(Block info (list (Instr 'addq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Instr 'popq (list (Reg 'rbp))) (Retq))))
+        ))
+]))
 
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -439,7 +455,7 @@
      ("uncover live", uncover-live, interp-x86-0)
      ("interference graph", build-interference, interp-x86-0)
      ("allocate registers", allocate-registers, interp-x86-0)
-     ("assign homes", assign-homes, interp-x86-0)
+    ;;;  ("assign homes", assign-homes, interp-x86-0)
      ("patch instructions", patch-instructions, interp-x86-0)
      ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
