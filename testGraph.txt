@@ -1,9 +1,6 @@
 strict graph {
 #<Reg: rax>;
-#<Var: x13817>;
 #<Reg: rsp>;
 #<Reg: rax> -- #<Reg: rsp>;
-#<Var: x13817> -- #<Reg: rsp>;
 #<Reg: rsp> -- #<Reg: rax>;
-#<Reg: rsp> -- #<Var: x13817>;
 }

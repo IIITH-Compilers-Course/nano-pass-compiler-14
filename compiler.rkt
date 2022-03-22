@@ -362,7 +362,7 @@
 
 (define cmp-<                 
   (lambda (node1 node2)         
-    (< (length (node-blockedColorsSet node1)) (length (node-blockedColorsSet node2)) ))
+    (< (length (set-to-list (node-blockedColorsSet node1))) (length (set-to-list (node-blockedColorsSet node2)))) )
 )
 
 (define (mex s [i 0])
@@ -372,13 +372,25 @@
     )
 )
 
-(define (update-neighbours graph curNode q vname-pointer curColor)
-    (for ([v (in-neighbors graph (node-name curNode) )]) (
-    ;;;    (define curNeighbour (dict-ref vname-pointer v))
-    ;;;    (define newSet (list->set (append (curColor) (set-to-list (node-blockedColorsSet  (dict-ref vname-pointer v)) ) )))
-       (set-node-blockedColorsSet!  (dict-ref vname-pointer v) (list->set (append (curColor) (set-to-list (node-blockedColorsSet  (dict-ref vname-pointer v)) ) )))        
-    ))
-    q     
+(define (update-neighbours q vname-pointer curColor neighbors)
+    (display neighbors)
+    (match neighbors
+        ['() q]
+        [_ 
+            (define curNeighbour (dict-ref vname-pointer (car neighbors)) )
+            (display curNeighbour)
+            (display "KAN")
+            (display "\n")
+            (define st (node-blockedColorsSet curNeighbour))
+            (display "MAN")
+            (display "\n")
+            (define newSet (list->set (append (curColor) st)))
+            (display newSet)
+            (set-node-blockedColorsSet! curNeighbour newSet) 
+            (pqueue-decrease-key! q curNeighbour)
+            (update-neighbours q vname-pointer curColor (cdr neighbors))                                       
+        ]
+    )   
 )
 
 (define (assign-next q vname-pointer graph [var-colors '()] ) 
@@ -387,26 +399,22 @@
         [else 
             (define curNode (pqueue-pop! q))
             (define curColor (mex (set-to-list (node-blockedColorsSet curNode)) ))
-            (define updatedQ (update-neighbours graph curNode q vname-pointer curColor))
+            (define updatedQ (update-neighbours q vname-pointer curColor (sequence->list (in-neighbors graph (node-name curNode))) ))
             (assign-next updatedQ vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
         ]
     )
 )
 
-(define (allocate-registers-helper variableList graph) 
-    (define q (make-pqueue cmp-<))
-    (define vname-pointer '())
-    (for ([v variableList]) (
-        (display "\n")
-        (display "\n")
-        (display (car v))
-        (display "\n")
-        (display "\n")
-        ;;; (define node (pqueue-push! q (node (car v) (set))))
-        ;;; (dict-set vname-pointer (car v) (pqueue-push! q (node (car v) (set))))
-    ))
-    variableList    
-    ;;; (assign-next q vname-pointer graph)
+(define (allocate-registers-helper variableList graph [vname-pointer '()] [q (make-pqueue cmp-<)] ) 
+    ;;; (display)
+    (match variableList
+        ['() (assign-next q vname-pointer graph)]
+        [_ 
+            (define curVar (car variableList))
+            (allocate-registers-helper (cdr variableList) graph 
+                (dict-set vname-pointer curVar (pqueue-push! q (node curVar (set)))) q) 
+        ]
+    )
 )
 
 (define (allocate-registers p)
@@ -416,7 +424,9 @@
                 [`((start . ,(Block sinfo instrs)))
                 (display "lauda lasan")
                 (display "\n")
-                (display (allocate-registers-helper (dict-ref info 'locals-types) (dict-ref info 'conflicts)))
+                (print-dot  (dict-ref info 'conflicts) "testGraph.txt")
+                (define graph (dict-ref info 'conflicts))
+                (display (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
                 (display "\n")
                 (X86Program info `((start . ,(Block sinfo instrs))))])
         ]
