@@ -358,29 +358,48 @@
     )
 )
 
-(struct node (name [blocked-colors-set #:mutable]))
+(struct node (name [blockedColorsSet #:mutable]))
 
 (define cmp-<                 
   (lambda (node1 node2)         
-    (< (length (node-blocked-colors-set node1)) (length (node-blocked-colors-set node2)) ))
+    (< (length (node-blockedColorsSet node1)) (length (node-blockedColorsSet node2)) ))
 )
 
-
-(define (assign-next q vname-pointer) 
-    (cond 
-        [(eq? (pqueue-count q) 0) ()]
-        [else (assign-next  )]
+(define (mex s [i 0])
+    (match (member i s)
+        [#f i]
+        [_ (mex s (+ i 1))]
     )
 )
 
-(define (allocate-registers-helper variableList) 
+(define (update-neighbours graph curNode q curColor)
+    (for ([v (in-neighbors graph curNode-name)]) (
+        (define node (pqueue-push! q (node v (set))))
+        (dict-set vname-pointer v node))
+    )
+     
+)
+
+(define (assign-next q vname-pointer [var-colors '()] graph) 
+    (cond 
+        [(eq? (pqueue-count q) 0) var-colors]
+        [else (
+            (define curNode (pqueue-pop! q))
+            (define curColor (mex (set-set-to-list (node-blockedColorsSet curNode)) )
+            (dict-set var-colors curNode-name curColor)
+            (update-neighbours graph curNode q vname-pointer curColor)
+        )]
+    )
+)
+
+(define (allocate-registers-helper variableList graph) 
     (define q (make-pqueue cmp-<))
     (define vname-pointer '())
     (for ([v variableList]) (
         (define node (pqueue-push! q (node v (set))))
         (dict-set vname-pointer v node))
     )
-    (assign-next q vname-pointer)
+    (assign-next q vname-pointer graph)
 )
 
 
