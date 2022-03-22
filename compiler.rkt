@@ -403,14 +403,15 @@
     (assign-next q vname-pointer graph)
 )
 
-
-
 (define (allocate-registers p)
     (match p
-;;;  (dict-ref info 'locals-types)
         [(X86Program info body)
             (match body
                 [`((start . ,(Block sinfo instrs)))
+                (display "lauda lasan")
+                (display "\n")
+                (display (allocate-registers-helper (dict-ref info 'locals-types) (dict-ref info 'conflicts)))
+                (display "\n")
                 (X86Program info `((start . ,(Block sinfo instrs))))])
         ]
     )
