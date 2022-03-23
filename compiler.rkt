@@ -538,8 +538,6 @@
   (match p
     [(X86Program info es) (X86Program info (map (lambda (x) `(,(car x) . ,(patch-instructions-convert (cdr x)))) es))]))
 
-
-
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
     (match p
