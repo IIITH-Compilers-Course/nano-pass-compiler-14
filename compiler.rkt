@@ -444,9 +444,14 @@
 (define (patch-instructions-convert stm)
     (match stm
         [(Instr op (list (Deref 'rbp offset_1) (Deref 'rbp offset_2))) 
-            (list
-                (Instr 'movq (list (Deref 'rbp offset_1) (Reg 'rax)))
-                (Instr op (list (Reg 'rax) (Deref 'rbp offset_2)))
+            (cond
+                [(eq? offset_1 offset_2) '()]
+                [else 
+                    (list
+                        (Instr 'movq (list (Deref 'rbp offset_1) (Reg 'rax)))
+                        (Instr op (list (Reg 'rax) (Deref 'rbp offset_2)))
+                    )
+                ]
             )
         ]
         [(Block info body) (Block info (append-map patch-instructions-convert body))] 
@@ -483,6 +488,6 @@
      ("interference graph", build-interference, interp-x86-0)
      ("allocate registers", allocate-registers, interp-x86-0)
     ;;;  ("assign homes", assign-homes, interp-x86-0)
-    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
-    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+     ("patch instructions", patch-instructions, interp-x86-0)
+     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
