@@ -206,15 +206,16 @@
     [(CProgram info e) 
         (X86Program info `((start . ,(Block info (select-instructions-statement (dict-ref e 'start))))))]))
 
+(define (assign-homes-map vars [offset -8] [varmap '()])
+    (match vars
+        ['() varmap]
+        [(cons a c) (assign-homes-map c (- offset 8) (dict-set varmap (car a) offset))]
+    )   
+)
+
 (define (assign-homes-convert e varmap)
     (match e
-        [(Var e) 
-            (define color (dict-ref varmap (Var e)))
-            (cond   
-                [(< color 12) (color-to-register color)]
-                [else (Deref 'rbp (* 8 (- 11 color)) )]
-            )
-        ]
+        [(Var e) (Deref 'rbp (dict-ref varmap e))]
         [_ e]
     )
 )
@@ -222,14 +223,43 @@
 (define (assign-homes-mapvars varmap stm)
     (match stm
         [(Instr op args) (Instr op (map (lambda (x) (assign-homes-convert x varmap)) args))]
+        [(Block info body) (Block info (for/list ([nxt body]) (assign-homes-mapvars varmap nxt)))] 
         [_ stm]
     )
 )
 
 ;; assign-homes : pseudo-x86 -> pseudo-x86
-(define (assign-homes instrs varmap)
-    (for/list ([stm instrs]) (assign-homes-mapvars varmap stm))
+(define (assign-homes p)
+  (match p
+    [(X86Program info e) (X86Program (dict-set info 'stack-space (* 8 (length (dict-ref info 'locals-types))) ) (map (lambda (x) `(,(car x) . ,(assign-homes-mapvars (assign-homes-map (dict-ref info 'locals-types)) (cdr x)))) e))]))
+
+(define (patch-instructions-convert stm)
+    (match stm
+        [(Instr op (list (Deref 'rbp offset_1) (Deref 'rbp offset_2))) 
+            (list
+                (Instr 'movq (list (Deref 'rbp offset_1) (Reg 'rax)))
+                (Instr op (list (Reg 'rax) (Deref 'rbp offset_2)))
+            )
+        ]
+        [(Block info body) (Block info (append-map patch-instructions-convert body))] 
+        [_ (list stm)]
+    )
 )
+
+;; patch-instructions : psuedo-x86 -> x86
+(define (patch-instructions p)
+  (match p
+    [(X86Program info es) (X86Program info (map (lambda (x) `(,(car x) . ,(patch-instructions-convert (cdr x)))) es))]))
+
+;; prelude-and-conclusion : x86 -> x86
+(define (prelude-and-conclusion p)
+    (match p
+        [(X86Program info es) (X86Program info `( 
+            (start . ,(dict-ref es 'start))
+            (main . ,(Block info (list (Instr 'pushq (list (Reg 'rbp))) (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) (Instr 'subq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Jmp 'start))))
+            (conclusion . ,(Block info (list (Instr 'addq (list (Imm (align (dict-ref info 'stack-space) 16)) (Reg 'rsp))) (Instr 'popq (list (Reg 'rbp))) (Retq))))
+        ))
+]))
 
 (define (check-int e)
     (if (not (Imm? e) ) #t #f)
@@ -239,34 +269,6 @@
     (list->set (for/list ([e lst] #:when (check-int e)) e))  
 )
 
-(define caller-saved-registers (set
-                                (Reg 'rax)
-                                (Reg 'rcx)
-                                (Reg 'rdx)
-                                (Reg 'rsi)
-                                (Reg 'rdi)
-                                (Reg 'r8)
-                                (Reg 'r9)
-                                (Reg 'r10)
-                                (Reg 'r11)))
-
-(define callee-saved-registers (list
-                                (Reg 'rsp)
-                                (Reg 'rbp)
-                                (Reg 'rbx)
-                                (Reg 'r12)
-                                (Reg 'r13)
-                                (Reg 'r14)
-                                (Reg 'r15)))
-
-(define argument-registers (set
-                            (Reg 'rdi)
-                            (Reg 'rsi)
-                            (Reg 'rdx)
-                            (Reg 'rcx)
-                            (Reg 'r8)
-                            (Reg 'r9)))
-
 (define (extract-reads instr)
     (match instr
         [(Instr 'movq es) (list-to-set (list (car es))) ]
@@ -274,7 +276,6 @@
         [(Instr 'subq es) (list-to-set es)]
         [(Instr 'negq es) (list-to-set es)]
         [(Jmp _) (set (Reg 'rax) (Reg 'rsp))]
-        [(Callq _ _) argument-registers]
         [_ (set)]
     )
 )
@@ -285,7 +286,6 @@
         [(Instr 'addq es) (list->set (cdr es))]
         [(Instr 'subq es) (list->set (cdr es))]
         [(Instr 'negq es) (list->set es)]
-        [(Callq _ _) caller-saved-registers]
         [_ (set)]
     )
 )
@@ -317,10 +317,6 @@
     )
 )
 
-(define (set-to-list s) 
-    (for/list ([e s]) e)
-)
-
 (define (add-edges d curInstr curLive interference-graph)
     (for ([v curLive]) 
         (when (not (eq? v d)) 
@@ -333,11 +329,8 @@
     interference-graph
 )
 
-(define (add-edges-helper curWrite curInstr curLive interference-graph)
-    (match curWrite
-        ['() interference-graph]
-        [(cons a c) (add-edges-helper c curInstr curLive (add-edges a curInstr curLive interference-graph)) ]
-    )
+(define (set-to-list s) 
+    (for/list ([e s]) e)
 )
 
 (define (build-graph list-live-after listOfInstructions [interference-graph (undirected-graph '())]) 
@@ -346,7 +339,11 @@
         [_  (define curInstr (car listOfInstructions))
             (define curWrite (set-to-list (extract-writes curInstr)) )
             (define curLive (car list-live-after))
-            (build-graph (cdr list-live-after) (cdr listOfInstructions) (add-edges-helper curWrite curInstr curLive interference-graph))
+            
+            (match curWrite 
+                ['() (build-graph (cdr list-live-after) (cdr listOfInstructions) interference-graph )]
+                [(list a) (build-graph (cdr list-live-after) (cdr listOfInstructions) (add-edges a curInstr curLive interference-graph) )]
+            )
         ]
     )
 )
@@ -361,45 +358,7 @@
     )
 )
 
-(define (color-to-register color)
-  (match color
-    [0 (Reg 'rcx)]
-    [1 (Reg 'rdx)]
-    [2 (Reg 'rsi)]
-    [3 (Reg 'rdi)]
-    [4 (Reg 'r8)]
-    [5 (Reg 'r9)]
-    [6 (Reg 'r10)]
-    [7 (Reg 'r11)]
-    [8 (Reg 'rbx)]
-    [9 (Reg 'r12)]
-    [10 (Reg 'r13)]
-    [11 (Reg 'r14)]
-  )
-)
-
-(define (register-to-color reg)
-  (match reg
-    [(Reg 'rcx) 1]
-    [(Reg 'rdx) 2]
-    [(Reg 'rsi) 3]
-    [(Reg 'rdi) 4]
-    [(Reg 'r8) 5]
-    [(Reg 'r9) 6]
-    [(Reg 'r10) 7]
-    [(Reg 'r11) 8]
-    [(Reg 'rbx) 9]
-    [(Reg 'r12) 10]
-    [(Reg 'r13) 11]
-    [(Reg 'r14) 12]
-    [(Reg 'rax) -1]
-    [(Reg 'rsp) -2]
-    [(Reg 'rbp) -3]
-    [(Reg 'r15) -4]
-  )
-)
-
-(struct node (name [blockedColorsSet #:mutable]))
+(struct node (name))
 
 (define cmp-<                 
   (lambda (node1 node2)         
@@ -413,99 +372,41 @@
     )
 )
 
-(define (update-neighbours q vname-pointer curColor neighbors)
+(define (update-neighbours q vname-pointer curColor neighbors blockedColorsSet)
     (match neighbors
         ['() q]
         [_ 
             (define curNeighbour (dict-ref vname-pointer (car neighbors)) )
-            (define nk  (node-key curNeighbour) )
-            (define st (set-to-list (node-blockedColorsSet nk)))
-            (define newSet (list->set (append (list curColor) st)))
-            (set-node-blockedColorsSet! nk newSet) 
+            (define st (set-to-list (dict-ref blockedColorsSet (node-name curNeighbour))))
+            (define newSet (list->set (append (curColor) st)))
+
             (pqueue-decrease-key! q curNeighbour)
-            (update-neighbours q vname-pointer curColor (cdr neighbors))                                       
+            (update-neighbours q vname-pointer curColor (cdr neighbors) (dict-set blockedColorsSet (node-name curNeighbour) newSet))
         ]
     )   
 )
 
-(define (assign-next q vname-pointer graph [var-colors '()] ) 
+(define (assign-next q vname-pointer graph blockedColorsSet [var-colors '()]) 
     (cond 
         [(eq? (pqueue-count q) 0) var-colors]
         [else 
             (define curNode (pqueue-pop! q))
-            (match (node-name curNode)
-                [(Reg r) 
-                   (define curColor (register-to-color (Reg r)) )
-                   (assign-next q vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
-                ]
-                [_ 
-                    (define curColor (mex (set-to-list (node-blockedColorsSet curNode)) ))
-                    (define updatedQ (update-neighbours q vname-pointer curColor (sequence->list (in-neighbors graph (node-name curNode))) ))
-                    (assign-next updatedQ vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
-                ]
-            )
+            (define curColor (mex (set-to-list (dict-ref blockedColorsSet (node-name curNode))) ))
+            (define updatedQ (update-neighbours q vname-pointer curColor (sequence->list (in-neighbors graph (node-name curNode))) blockedColorsSet))
+            (assign-next updatedQ vname-pointer graph blockedColorsSet (dict-set var-colors (node-name curNode) curColor))
         ]
     )
 )
 
-(define (allocate-registers-helper variableList graph [vname-pointer '()] [q (make-pqueue cmp-<)] [registerList '()]) 
+(define (allocate-registers-helper variableList graph [vname-pointer '()] [q (make-pqueue cmp-<)]   [blockedColorsSet '()]) 
     (match variableList
-        ['()
-            (for ([rg registerList]) (update-neighbours q vname-pointer (register-to-color rg) (sequence->list (in-neighbors graph rg)))) 
-            (assign-next q vname-pointer graph)]
+        ['() (assign-next q vname-pointer graph blockedColorsSet)]
         [_ 
             (define curVar (car variableList))
-            (match curVar
-                [(Reg _) (allocate-registers-helper (cdr variableList) graph 
-                    (dict-set vname-pointer curVar (pqueue-push! q (node curVar (set)))) q (cons curVar registerList))] 
-                [_ (allocate-registers-helper (cdr variableList) graph 
-                (dict-set vname-pointer curVar (pqueue-push! q (node curVar (set)))) q registerList)]
-            )
+            (allocate-registers-helper (cdr variableList) graph 
+                (dict-set vname-pointer curVar (pqueue-push! q (node curVar))) q (dict-set blockedColorsSet curVar (set))) 
         ]
     )
-)
-
-(define (num-spilled-var varColors [max 0]) 
-    (match varColors
-        ['()
-            (cond
-                [(> max 11) (- max 11)]
-                [else 0]
-            ) 
-        ]
-        [_  
-            (match (car (car varColors))
-                [(Var _) (define color (cdr (car varColors)) )
-                    (cond 
-                        [(< color max) (num-spilled-var (cdr varColors) max)]
-                        [else (num-spilled-var (cdr varColors) color)]
-                    )
-                ]
-                [_ (num-spilled-var (cdr varColors) max)]
-            )
-        ]
-    )
-)
-
-
-(define (used-callee varColors [usedCallee 0]) 
-    (match varColors
-            ['() (list->set usedCallee)]
-            [_  
-                (match (car (car varColors))
-                    [(Var _) 
-                        (define color (cdr (car varColors)))
-                        (define reg (color-to-register color))
-                        (cond 
-                            [(eq? #f (member reg callee-saved-registers)) (num-spilled-var (cdr varColors) usedCallee)]
-                            [else (num-spilled-var (cdr varColors) (cons reg usedCallee))]
-                        )
-                    ]
-                    [_ (num-spilled-var (cdr varColors) usedCallee)]
-                )
-            ]
-    )
-    
 )
 
 (define (allocate-registers p)
@@ -513,63 +414,16 @@
         [(X86Program info body)
             (match body
                 [`((start . ,(Block sinfo instrs)))
+                (display "lauda lasan")
+                (display "\n")
                 (print-dot  (dict-ref info 'conflicts) "testGraph.txt")
                 (define graph (dict-ref info 'conflicts))
-                (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
-                (define numSpilledVariables (num-spilled-var varColors))
-                (define usedCallee (used-callee varColors) )
-                (displayln "varcolors")
-                (displayln varColors)
-                (displayln "varcolors")
-                (X86Program (dict-set (dict-set info 'stack-space numSpilledVariables) 'used_callee usedCallee) `((start . ,(Block sinfo (assign-homes instrs varColors)))))])
+                (display (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
+                (display "\n")
+                (X86Program info `((start . ,(Block sinfo instrs))))])
         ]
     )
 )
-
-(define (patch-instructions-convert stm)
-    (match stm
-        [(Instr op (list (Deref 'rbp offset_1) (Deref 'rbp offset_2))) 
-            (cond
-                [(eq? offset_1 offset_2) '()]
-                [else 
-                    (list
-                        (Instr 'movq (list (Deref 'rbp offset_1) (Reg 'rax)))
-                        (Instr op (list (Reg 'rax) (Deref 'rbp offset_2)))
-                    )
-                ]
-            )
-        ]
-        [(Instr op (list (Reg reg1) (Reg reg2)))
-            (cond
-                [(eq? reg1 reg2) '()]
-                [else 
-                    (list (Instr op (list (Reg reg1) (Reg reg2))))
-                ]
-            )
-        ]
-        [(Block info body) (Block info (append-map patch-instructions-convert body))] 
-        [_ (list stm)]
-    )
-)
-
-;; patch-instructions : psuedo-x86 -> x86
-(define (patch-instructions p)
-  (match p
-    [(X86Program info es) (X86Program info (map (lambda (x) `(,(car x) . ,(patch-instructions-convert (cdr x)))) es))]))
-
-;; prelude-and-conclusion : x86 -> x86
-(define (prelude-and-conclusion p)
-    (match p
-        [(X86Program info es) 
-            (define S (dict-ref info 'stack-space))
-            (define C (dict-ref info 'used_callee))
-            (define A (- (align (+ (* 8 S) (* 8 C)) 16) (* 8 C)))
-            (X86Program info `( 
-            (start . ,(dict-ref es 'start))
-            (main . ,(Block info (list (Instr 'pushq (list (Reg 'rbp))) (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) (Instr 'subq (list (Imm A) (Reg 'rsp))) (Jmp 'start))))
-            (conclusion . ,(Block info (list (Instr 'addq (list (Imm A) (Reg 'rsp))) (Instr 'popq (list (Reg 'rbp))) (Retq))))
-        ))
-]))
 
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -584,6 +438,7 @@
      ("uncover live", uncover-live, interp-x86-0)
      ("interference graph", build-interference, interp-x86-0)
      ("allocate registers", allocate-registers, interp-x86-0)
+     ("assign homes", assign-homes, interp-x86-0)
      ("patch instructions", patch-instructions, interp-x86-0)
      ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
