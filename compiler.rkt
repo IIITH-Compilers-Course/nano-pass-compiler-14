@@ -250,6 +250,15 @@
                                 (Reg 'r10)
                                 (Reg 'r11)))
 
+(define callee-saved-registers (list
+                                (Reg 'rsp)
+                                (Reg 'rbp)
+                                (Reg 'rbx)
+                                (Reg 'r12)
+                                (Reg 'r13)
+                                (Reg 'r14)
+                                (Reg 'r15)))
+
 (define argument-registers (set
                             (Reg 'rdi)
                             (Reg 'rsi)
@@ -450,21 +459,46 @@
 
 (define (num-spilled-var varColors [max 0]) 
     (match varColors
-        ['() 
+        ['()
             (cond
                 [(> max 11) (- max 11)]
                 [else 0]
             ) 
         ]
-        [_  (define color (cdr (car varColors)) )
-            (cond 
-                [(< color max) (num-spilled-var (cdr varColors) max)]
-                [else (num-spilled-var (cdr varColors) color)]
+        [_  
+            (match (car (car varColors))
+                [(Var _) (define color (cdr (car varColors)) )
+                    (cond 
+                        [(< color max) (num-spilled-var (cdr varColors) max)]
+                        [else (num-spilled-var (cdr varColors) color)]
+                    )
+                ]
+                [_ (num-spilled-var (cdr varColors) max)]
             )
         ]
     )
 )
 
+
+(define (used-callee varColors [usedCallee 0]) 
+    (match varColors
+            ['() (list->set usedCallee)]
+            [_  
+                (match (car (car varColors))
+                    [(Var _) 
+                        (define color (cdr (car varColors)))
+                        (define reg (color-to-register color))
+                        (cond 
+                            [(eq? #f (member reg callee-saved-registers)) (num-spilled-var (cdr varColors) usedCallee)]
+                            [else (num-spilled-var (cdr varColors) (cons reg usedCallee))]
+                        )
+                    ]
+                    [_ (num-spilled-var (cdr varColors) usedCallee)]
+                )
+            ]
+    )
+    
+)
 
 (define (allocate-registers p)
     (match p
@@ -475,7 +509,8 @@
                 (define graph (dict-ref info 'conflicts))
                 (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
                 (define numSpilledVariables (num-spilled-var varColors))
-                (X86Program (dict-set info 'stack-space numSpilledVariables) `((start . ,(Block sinfo (assign-homes instrs varColors)))))])
+                (define usedCallee (used-callee varColors) )
+                (X86Program (dict-set (dict-set info 'stack-space numSpilledVariables) 'used_callee usedCallee) `((start . ,(Block sinfo (assign-homes instrs varColors)))))])
         ]
     )
 )
@@ -503,12 +538,14 @@
   (match p
     [(X86Program info es) (X86Program info (map (lambda (x) `(,(car x) . ,(patch-instructions-convert (cdr x)))) es))]))
 
+
+
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
     (match p
         [(X86Program info es) 
             (define S (dict-ref info 'stack-space))
-            (define C 7)
+            (define C (dict-ref info 'used_callee))
             (define A (- (align (+ (* 8 S) (* 8 C)) 16) (* 8 C)))
             (X86Program info `( 
             (start . ,(dict-ref es 'start))
@@ -530,7 +567,6 @@
      ("uncover live", uncover-live, interp-x86-0)
      ("interference graph", build-interference, interp-x86-0)
      ("allocate registers", allocate-registers, interp-x86-0)
-    ;;;  ("assign homes", assign-homes, interp-x86-0)
      ("patch instructions", patch-instructions, interp-x86-0)
      ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
