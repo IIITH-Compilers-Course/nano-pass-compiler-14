@@ -562,9 +562,8 @@
     (for/list ([rg (set-to-list registers)]) (Instr 'pushq (list rg)))
 )
 
-;;; TODO:: pop in reverse order
 (define (pop-calle-saved registers)
-    (for/list ([rg (set-to-list registers)]) (Instr 'popq (list rg)))
+    (for/list ([rg (reverse (set-to-list registers))]) (Instr 'popq (list rg)))
 )
 
 ;; prelude-and-conclusion : x86 -> x86
