@@ -206,29 +206,29 @@
     [(CProgram info e) 
         (X86Program info `((start . ,(Block info (select-instructions-statement (dict-ref e 'start))))))]))
 
-(define (assign-homes-convert e varmap)
+(define (assign-homes-convert e varmap usedCalleeNum)
     (match e
         [(Var e) 
             (define color (dict-ref varmap (Var e)))
             (cond   
                 [(< color 12) (color-to-register color)]
-                [else (Deref 'rbp (* 8 (- 11 color)) )]
+                [else (Deref 'rbp (* 8 (- (- 11 color) usedCalleeNum)))]
             )
         ]
         [_ e]
     )
 )
 
-(define (assign-homes-mapvars varmap stm)
+(define (assign-homes-mapvars varmap stm usedCalleeNum)
     (match stm
-        [(Instr op args) (Instr op (map (lambda (x) (assign-homes-convert x varmap)) args))]
+        [(Instr op args) (Instr op (map (lambda (x) (assign-homes-convert x varmap usedCalleeNum)) args))]
         [_ stm]
     )
 )
 
 ;; assign-homes : pseudo-x86 -> pseudo-x86
-(define (assign-homes instrs varmap)
-    (for/list ([stm instrs]) (assign-homes-mapvars varmap stm))
+(define (assign-homes instrs varmap usedCalleeNum)
+    (for/list ([stm instrs]) (assign-homes-mapvars varmap stm usedCalleeNum))
 )
 
 (define (check-int e)
@@ -488,24 +488,28 @@
 )
 
 
-(define (used-callee varColors [usedCallee 0]) 
+(define (used-callee varColors [usedCallee '()]) 
     (match varColors
-            ['() (list->set usedCallee)]
-            [_  
-                (match (car (car varColors))
-                    [(Var _) 
-                        (define color (cdr (car varColors)))
-                        (define reg (color-to-register color))
-                        (cond 
-                            [(eq? #f (member reg callee-saved-registers)) (num-spilled-var (cdr varColors) usedCallee)]
-                            [else (num-spilled-var (cdr varColors) (cons reg usedCallee))]
-                        )
-                    ]
-                    [_ (num-spilled-var (cdr varColors) usedCallee)]
-                )
-            ]
+        ['() (list->set usedCallee)]
+        [_  
+            (match (car (car varColors))
+                [(Var _) 
+                    (define color (cdr (car varColors)))
+                    (cond 
+                        [(< color 12) 
+                            (define reg (color-to-register color))
+                            (cond 
+                                [(eq? #f (member reg callee-saved-registers)) (used-callee (cdr varColors) usedCallee)]
+                                [else (used-callee (cdr varColors) (cons reg usedCallee))]
+                            )
+                        ]
+                        [else (used-callee (cdr varColors) usedCallee)]
+                    )
+                ]
+                [_ (used-callee (cdr varColors) usedCallee)]
+            )
+        ]
     )
-    
 )
 
 (define (allocate-registers p)
@@ -518,10 +522,7 @@
                 (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
                 (define numSpilledVariables (num-spilled-var varColors))
                 (define usedCallee (used-callee varColors) )
-                (displayln "varcolors")
-                (displayln varColors)
-                (displayln "varcolors")
-                (X86Program (dict-set (dict-set info 'stack-space numSpilledVariables) 'used_callee usedCallee) `((start . ,(Block sinfo (assign-homes instrs varColors)))))])
+                (X86Program (dict-set (dict-set info 'stack-space numSpilledVariables) 'used_callee usedCallee) `((start . ,(Block sinfo (assign-homes instrs varColors (length (set-to-list usedCallee)))))))])
         ]
     )
 )
@@ -557,17 +558,39 @@
   (match p
     [(X86Program info es) (X86Program info (map (lambda (x) `(,(car x) . ,(patch-instructions-convert (cdr x)))) es))]))
 
+(define (push-calle-saved registers)
+    (for/list ([rg (set-to-list registers)]) (Instr 'pushq (list rg)))
+)
+
+;;; TODO:: pop in reverse order
+(define (pop-calle-saved registers)
+    (for/list ([rg (set-to-list registers)]) (Instr 'popq (list rg)))
+)
+
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
     (match p
         [(X86Program info es) 
             (define S (dict-ref info 'stack-space))
-            (define C (dict-ref info 'used_callee))
+            (define C (length (set-to-list (dict-ref info 'used_callee))))
             (define A (- (align (+ (* 8 S) (* 8 C)) 16) (* 8 C)))
             (X86Program info `( 
             (start . ,(dict-ref es 'start))
-            (main . ,(Block info (list (Instr 'pushq (list (Reg 'rbp))) (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) (Instr 'subq (list (Imm A) (Reg 'rsp))) (Jmp 'start))))
-            (conclusion . ,(Block info (list (Instr 'addq (list (Imm A) (Reg 'rsp))) (Instr 'popq (list (Reg 'rbp))) (Retq))))
+            (main . ,(Block info (append (list (Instr 'pushq (list (Reg 'rbp)))) 
+                                         (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))) 
+                                         (push-calle-saved (dict-ref info 'used_callee)) 
+                                         (list (Instr 'subq (list (Imm A) (Reg 'rsp))))
+                                         (list (Jmp 'start))
+                                  )
+                        )
+            )
+            (conclusion . ,(Block info (append  (list (Instr 'addq (list (Imm A) (Reg 'rsp)))) 
+                                                (pop-calle-saved (dict-ref info 'used_callee))
+                                                (list (Instr 'popq (list (Reg 'rbp))))
+                                                (list (Retq))
+                                        )
+                            )
+            )
         ))
 ]))
 
