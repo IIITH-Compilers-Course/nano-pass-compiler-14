@@ -6,7 +6,9 @@
 (require "interp-Lint.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
+(require "interp-Lif.rkt")
 (require "type-check-Lvar.rkt")
+(require "type-check-Lif.rkt")
 (require "type-check-Cvar.rkt")
 (require "utilities.rkt")
 (require "graph-printing.rkt")
@@ -62,15 +64,35 @@
 ;; HW1 Passes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+
+(define (shrink-helper e)
+
+    (match e
+        [(Prim 'and (list e1 e2)) (If (shrink-helper e1) (shrink-helper e2) (Bool #f))]
+        [(Prim 'or (list e1 e2)) (If (shrink-helper e1) (Bool #t) (shrink-helper e2) )]
+        [_ e]
+    )
+)
+
+(define (shrink p)
+    (match p
+        [(Program info e) (Program info (shrink-helper e))]
+    )
+)
+
 (define (uniquify-exp env)
   (lambda (e)
     (match e
       [(Var x) (Var (dict-ref env x))]
       [(Int n) (Int n)]
+      [(Bool b) (Bool b)]
       [(Let x e body)
         (define var1 (gensym x))
         (define env^ (dict-set env x var1))
         (Let var1 ((uniquify-exp env) e) ((uniquify-exp env^) body))
+      ]
+      [(If cond exp1 exp2)
+        (If (uniquify-exp cond) (uniquify-exp exp1) (uniquify-exp exp2))
       ]
       [(Prim op es)
        (Prim op (for/list ([e es]) ((uniquify-exp env) e)))])))
@@ -566,6 +588,7 @@
     (for/list ([rg (reverse (set-to-list registers))]) (Instr 'popq (list rg)))
 )
 
+
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
     (match p
@@ -593,19 +616,23 @@
         ))
 ]))
 
+
+
+
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `( 
-     ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
-     ("uniquify", uniquify, interp-Lvar, type-check-Lvar)
-     ("remove complex opera*", remove-complex-opera*, interp-Lvar, type-check-Lvar)
-     ("explicate control", explicate_control, interp-Cvar, type-check-Cvar)
-     ("instruction selection", select-instructions, interp-x86-0)
-     ("uncover live", uncover-live, interp-x86-0)
-     ("interference graph", build-interference, interp-x86-0)
-     ("allocate registers", allocate-registers, interp-x86-0)
-     ("patch instructions", patch-instructions, interp-x86-0)
-     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ;;;  ("shrink", shrink, interp-Lif, type-check-Lif)
+    ;;;  ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
+    ;;;  ("uniquify", uniquify, interp-Lvar, type-check-Lvar)
+    ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lvar, type-check-Lvar)
+    ;;;  ("explicate control", explicate_control, interp-Cvar, type-check-Cvar)
+    ;;;  ("instruction selection", select-instructions, interp-x86-0)
+    ;;;  ("uncover live", uncover-live, interp-x86-0)
+    ;;;  ("interference graph", build-interference, interp-x86-0)
+    ;;;  ("allocate registers", allocate-registers, interp-x86-0)
+    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
+    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
