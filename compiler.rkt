@@ -80,6 +80,7 @@
     )
 )
 
+
 (define (uniquify-exp env)
   (lambda (e)
     (match e
@@ -106,6 +107,7 @@
     (match e
         [(Var n) #t]
         [(Int n) #t]
+        [(Bool n) #t]
         [_ #f]
     )
 )
@@ -114,7 +116,17 @@
     (match e
         [(Var n) (Var n)]
         [(Int n) (Int n)]
+        [(Bool n) (Bool n)]
         [(Prim 'read '()) (Prim 'read '())]
+        [(Prim 'not (list e1)) 
+            (cond
+                [(rco_atm e1) e]
+                [else
+                    (define var (gensym))
+                    (Let var (rco_exp e1) (Prim 'not (list (Var var))))
+                ]
+            )
+        ]
         [(Prim op (list e1 e2))
             (cond
                 [(and (rco_atm e1) (rco_atm e2)) e]
@@ -126,7 +138,7 @@
                     (define var1 (gensym))
                     (Let var1 (rco_exp e1) (Prim op (list e2 (Var var1))))
                 ]
-                [else e
+                [else
                     (define var1 (gensym))
                     (define var2 (gensym))
                     (Let var1 (rco_exp e1) (
@@ -144,7 +156,9 @@
                 ]
             )
         ]
+        [(Prim op (e1 e2))]
         [(Let x e body) (Let x (rco_exp e) (rco_exp body))]
+        [(If cond exp1 exp2) ((If (rco_exp cond) (rco_exp exp1) (rco_exp exp2)))]
     )
 )
 
