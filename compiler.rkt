@@ -168,11 +168,27 @@
     [(Program info e) 
         (Program info (rco_exp e))]))
 
+(define (explicate_pred cnd thn els)
+    (match cnd
+        [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t)) (create_block thn)
+        (create_block els)))]
+        [(Let x rhs body) (explicate_assign rhs x (explicate_pred body))]
+        [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list (Var x) (Bool #f)) (create_block thn)
+        (create_block els)))]
+        [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<))
+        (IfStmt (Prim op es) (create_block thn)
+        (create_block els))]
+        [(Bool b) (if b thn els)]
+        [(If cnd^ thn^ els^) ___]
+        [else (error "explicate_pred unhandled case" cnd)]))
+
+
 (define (explicate_tail e)
     (match e
         [(Var x) (Return (Var x))]
         [(Int n) (Return (Int n))]
         [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
+        [(If cond exp1 exp2) (explicate_tail cond) ]
         [(Prim op es) (Return (Prim op es))]
         [else (error "explicate_tail unhandled case" e)]))
 
