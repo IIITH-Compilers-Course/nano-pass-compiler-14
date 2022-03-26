@@ -711,6 +711,18 @@
 
 (define (patch-instructions-convert stm)
     (match stm
+        [(Instr 'movzbq (list (ByteReg 'al) (Deref 'rbp offset))) 
+                (list
+                    (Instr 'movzbq (list (ByteReg 'al) (Reg 'rax)))
+                    (Instr 'movq (list (Reg 'rax) (Deref 'rbp offset)))
+                )
+        ]
+        [(Instr 'cmpq (list src (Imm n))) 
+                (list
+                    (Instr 'movq (list (Imm n) (Reg 'rax)))
+                    (Instr 'cmpq (list src (Reg 'rax)))
+                )
+        ]
         [(Instr op (list (Deref 'rbp offset_1) (Deref 'rbp offset_2))) 
             (cond
                 [(eq? offset_1 offset_2) '()]
