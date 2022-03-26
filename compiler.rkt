@@ -731,14 +731,24 @@
             )
         ]
         [(Block info body) (Block info (append-map patch-instructions-convert body))] 
-        [_ (list stm)]
+        [_ stm]
     )
 )
 
 ;; patch-instructions : psuedo-x86 -> x86
 (define (patch-instructions p)
-  (match p
-    [(X86Program info es) (X86Program info (map (lambda (x) `(,(car x) . ,(patch-instructions-convert (cdr x)))) es))]))
+    (match p
+        [(X86Program info body)
+            (dict-for-each body
+                (lambda (lbl instrs)
+                    (match (dict-ref body lbl)
+                        [(Block sinfo instrs) (dict-set! body lbl (Block sinfo (patch-instructions-convert instrs)))] 
+                    )
+                )
+            )
+        (X86Program info body)]
+    )
+)
 
 (define (push-calle-saved registers)
     (for/list ([rg (set-to-list registers)]) (Instr 'pushq (list rg)))
@@ -748,7 +758,6 @@
     (for/list ([rg (reverse (set-to-list registers))]) (Instr 'popq (list rg)))
 )
 
-
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
     (match p
@@ -756,28 +765,28 @@
             (define S (dict-ref info 'stack-space))
             (define C (length (set-to-list (dict-ref info 'used_callee))))
             (define A (- (align (+ (* 8 S) (* 8 C)) 16) (* 8 C)))
-            (X86Program info `( 
-            (start . ,(dict-ref es 'start))
-            (main . ,(Block info (append (list (Instr 'pushq (list (Reg 'rbp)))) 
-                                         (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))) 
-                                         (push-calle-saved (dict-ref info 'used_callee)) 
-                                         (list (Instr 'subq (list (Imm A) (Reg 'rsp))))
-                                         (list (Jmp 'start))
-                                  )
-                        )
-            )
-            (conclusion . ,(Block info (append  (list (Instr 'addq (list (Imm A) (Reg 'rsp)))) 
-                                                (pop-calle-saved (dict-ref info 'used_callee))
-                                                (list (Instr 'popq (list (Reg 'rbp))))
-                                                (list (Retq))
-                                        )
+            
+            (dict-set! es 'main 
+                (Block info (append (list (Instr 'pushq (list (Reg 'rbp)))) 
+                                                    (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))) 
+                                                    (push-calle-saved (dict-ref info 'used_callee)) 
+                                                    (list (Instr 'subq (list (Imm A) (Reg 'rsp))))
+                                                    (list (Jmp 'start))
                             )
+                )
             )
-        ))
-]))
+            (dict-set! es 'conclusion 
+                            (Block info (append  (list (Instr 'addq (list (Imm A) (Reg 'rsp)))) 
+                                                        (pop-calle-saved (dict-ref info 'used_callee))
+                                                        (list (Instr 'popq (list (Reg 'rbp))))
+                                                        (list (Retq))
+                                                )
+                                    )
+            )
 
-
-
+        (X86Program info es)]
+    )  
+)
 
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -793,6 +802,6 @@
      ("uncover live", uncover-live, interp-x86-0)
      ("interference graph", build-interference, interp-x86-0)
      ("allocate registers", allocate-registers, interp-x86-0)
-    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
-    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+     ("patch instructions", patch-instructions, interp-x86-0)
+     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
