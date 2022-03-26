@@ -28,10 +28,10 @@
 
 (debug-level 1)
 ;;; (interp-tests "cond" type-check-Lif compiler-passes interp-Lvar "cond_test" (tests-for "cond"))
-(interp-tests "var" type-check-Lif compiler-passes interp-Lif "var_test" (tests-for "var"))
+;;; (interp-tests "var" type-check-Lif compiler-passes interp-Lif "var_test" (tests-for "var"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-;;; (compiler-tests "var" type-check-Lif compiler-passes "var_test" (tests-for "var"))
+(compiler-tests "var" type-check-Lif compiler-passes "cond_test" (tests-for "cond"))
 ;;; (compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
 
