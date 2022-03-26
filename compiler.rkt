@@ -421,7 +421,7 @@
     )
 )
 
-(define (get-live-after listOfInstructions)
+(define (get-live-after listOfInstructions initialSet)
     (match listOfInstructions
         [(list a) (list (extract-reads a))] 
         [_ (let ([list-live-after (get-live-after (cdr listOfInstructions))])
@@ -437,7 +437,6 @@
     )
 )
 
-
 (define (makeCFG lbl instrs [cfgEdge '()])
     (match instrs
         ['() cfgEdge]
@@ -450,22 +449,34 @@
     )
 )
 
+(define (uncover-live-block lbl block graph)
+    (match block
+        [(Block info instrs)
+            (define children (sequence->list (in-neighbors graph lbl)))
+            (define initialSet (set))
+            (for ([child children]) (set! initialSet (set-union initialSet (dict-ref label-live child))))
+            (define live-after-list (get-live-after instrs initialSet))
+            (dict-set! label-live (car live-after-list))
+            (Block (dict-set info label live-after-list) instrs)
+        ]        
+    )
+)
+
 (define (uncover-live p)
     (match p
         [(X86Program info e) 
-            (define instrBlocks (make-hash))
             (define cfgEdges '())
             (dict-for-each e 
                 (lambda (lbl instrs) (set! cfgEdges (append cfgEdges (makeCFG lbl (Block-instr* instrs)))))
             )
 
-            (displayln "KANISH")
-            (displayln cfgEdges)
             (define graph (make-multigraph cfgEdges))
             (define graphTransp (transpose graph))
-            (set! cfgEdges (tsort graphTransp))
+            (define topoOrder (tsort graph))
+            (displayln "KANISH")
+            (displayln cfgEdges)
 
-            ;;; (for/list ([e cfgEdges]) (display e))
+            (for/list ([label topoOrder] #:when (not (eq? label 'conclusion))) (uncover-live-block label (dict-ref e label) graph))
 
             (X86Program info e)
         ]
