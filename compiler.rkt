@@ -94,7 +94,7 @@
         (Let var1 ((uniquify-exp env) e) ((uniquify-exp env^) body))
       ]
       [(If cond exp1 exp2)
-        (If (uniquify-exp cond) (uniquify-exp exp1) (uniquify-exp exp2))
+        (If ((uniquify-exp env) cond) ((uniquify-exp env) exp1) ((uniquify-exp env) exp2))
       ]
       [(Prim op es)
        (Prim op (for/list ([e es]) ((uniquify-exp env) e)))])))
@@ -655,9 +655,9 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `( 
-     ("shrink", shrink, interp-Lif, type-check-Lif)
     ;;;  ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
-    ;;;  ("uniquify", uniquify, interp-Lvar, type-check-Lvar)
+     ("shrink", shrink, interp-Lif, type-check-Lif)
+     ("uniquify", uniquify, interp-Lif, type-check-Lif)
     ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lvar, type-check-Lvar)
     ;;;  ("explicate control", explicate_control, interp-Cvar, type-check-Cvar)
     ;;;  ("instruction selection", select-instructions, interp-x86-0)
