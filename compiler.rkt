@@ -64,12 +64,14 @@
 ;; HW1 Passes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
 (define (shrink-helper e)
-
     (match e
         [(Prim 'and (list e1 e2)) (If (shrink-helper e1) (shrink-helper e2) (Bool #f))]
         [(Prim 'or (list e1 e2)) (If (shrink-helper e1) (Bool #t) (shrink-helper e2) )]
+        [(Let x e body) (Let (shrink-helper x) (shrink-helper e) (shrink-helper body))]
+        [(If cond e1 e2) (If (shrink-helper cond) (shrink-helper e1) (shrink-helper e2))]
+        [(Prim '- (list e1 e2)) ((Prim '+ (list (shrink-helper e1) (Prim '- (list (shrink-helper e2))))))] 
+        [(Prim op es) (Prim op (for/list ([e es]) (shrink-helper e)))]
         [_ e]
     )
 )
@@ -79,7 +81,6 @@
         [(Program info e) (Program info (shrink-helper e))]
     )
 )
-
 
 (define (uniquify-exp env)
   (lambda (e)
@@ -156,7 +157,7 @@
                 ]
             )
         ]
-        [(Prim op (e1 e2))]
+        ;;; [(Prim op (e1 e2))]
         [(Let x e body) (Let x (rco_exp e) (rco_exp body))]
         [(If cond exp1 exp2) ((If (rco_exp cond) (rco_exp exp1) (rco_exp exp2)))]
     )
@@ -170,17 +171,17 @@
 
 (define (explicate_pred cnd thn els)
     (match cnd
-        [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t)) (create_block thn)
-        (create_block els)))]
-        [(Let x rhs body) (explicate_assign rhs x (explicate_pred body))]
-        [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list (Var x) (Bool #f)) (create_block thn)
-        (create_block els)))]
-        [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<))
-        (IfStmt (Prim op es) (create_block thn)
-        (create_block els))]
+        ;;; [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t)) (create_block thn)
+        ;;; (create_block els)))]
+        ;;; [(Let x rhs body) ]
+        ;;; [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list (Var x) (Bool #f)) (create_block thn)
+        ;;; (create_block els)))]
+        ;;; [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<))
+        ;;; (IfStmt (Prim op es) (create_block thn)
+        ;;; (create_block els))]
         [(Bool b) (if b thn els)]
-        [(If cnd^ thn^ els^) ___]
-        [else (error "explicate_pred unhandled case" cnd)]))
+        ;;; [(If cnd^ thn^ els^) ___]
+        [_ (error "explicate_pred unhandled case" cnd)]))
 
 
 (define (explicate_tail e)
@@ -188,7 +189,7 @@
         [(Var x) (Return (Var x))]
         [(Int n) (Return (Int n))]
         [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
-        [(If cond exp1 exp2) (explicate_tail cond) ]
+        ;;; [(If cond exp1 exp2) (explicate_pred cond (explicate_tail exp1) (explicate_tail exp2))]
         [(Prim op es) (Return (Prim op es))]
         [else (error "explicate_tail unhandled case" e)]))
 
@@ -654,7 +655,7 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `( 
-    ;;;  ("shrink", shrink, interp-Lif, type-check-Lif)
+     ("shrink", shrink, interp-Lif, type-check-Lif)
     ;;;  ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
     ;;;  ("uniquify", uniquify, interp-Lvar, type-check-Lvar)
     ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lvar, type-check-Lvar)

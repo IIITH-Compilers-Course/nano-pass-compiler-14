@@ -4,6 +4,8 @@
 (require "utilities.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
+(require "interp-Lif.rkt")
+(require "type-check-Lif.rkt")
 (require "interp.rkt")
 (require "compiler.rkt")
 ;; (debug-level 1)
@@ -25,9 +27,11 @@
         all-tests)))
 
 (debug-level 1)
-;;; (interp-tests "var" #f compiler-passes interp-Lvar "var_test" (tests-for "var"))
+;;; (interp-tests "cond" type-check-Lif compiler-passes interp-Lvar "cond_test" (tests-for "cond"))
+(interp-tests "var" type-check-Lif compiler-passes interp-Lif "var_test" (tests-for "var"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
+;;; (compiler-tests "var" type-check-Lif compiler-passes "var_test" (tests-for "var"))
+;;; (compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
 
