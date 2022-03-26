@@ -226,21 +226,53 @@
 ;; explicate-control : R1 -> C0
 (define (explicate_control p)
     (match p
-    [(Program info body) (CProgram info (append (list (cons 'start (explicate_tail body))) basic-blocks))]))
+        [(Program info body) 
+            (define instrBlocks (make-hash))
+            (dict-set! instrBlocks 'start (explicate_tail body))
+            (for ([e basic-blocks]) (dict-set! instrBlocks (car e) (cdr e)))
+            (CProgram info instrBlocks)
+        ]    
+    )
+)
 
 (define (select-instructions-atomic e)
     (match e
         [(Int n) (Imm n)]
         [(Var n) (Var n)]
+        [(Bool #t) (Imm 1)]
+        [(Bool #f) (Imm 0)]
     )
 )
-
+(define (cmp-jcc cmprtr)
+  (match cmprtr
+    ['eq? 'e]
+    ['< 'l]
+    ['<= 'le]
+    ['>= 'ge]
+    ['> 'g]
+  )
+)
 (define (select-instructions-statement stm)
     (match stm
         ['() '()]
         [(Seq (Assign var exp) t*) (append (select-instructions-assignment exp var) (select-instructions-statement t*))]
         [(Return exp) (append (select-instructions-assignment exp (Reg 'rax)) (list (Jmp 'conclusion)))]
+        [(Goto lbl) (list (Jmp lbl))]
+        [(IfStmt (Prim cmp (list e1 e2)) (Goto l1) (Goto l2)) 
+                 (list (Instr 'cmpq (list (select-instructions-atomic e2) (select-instructions-atomic e1)))
+                              (JmpIf (cmp-jcc cmp) l1)
+                              (Jmp l2))]
     )
+)
+
+(define (cmp-setcc cmprtr)
+  (match cmprtr
+    ['eq? 'sete]
+    ['< 'setl]
+    ['<= 'setle]
+    ['>= 'setge]
+    ['> 'setg]
+  )
 )
 
 (define (select-instructions-assignment e x)
@@ -272,6 +304,24 @@
             (list (Callq 'read_int 0)  
                   (Instr 'movq (list (Reg 'rax) x)))
         ]
+        [(Prim 'not (list e1)) 
+            (cond 
+                [(eq? e1 x) (list (Instr 'xorq (list (select-instructions-atomic x) 
+                                                     (select-instructions-atomic (Bool #t)))))
+                ]
+                [else 
+                     (list (Instr 'movq (list (select-instructions-atomic e1) x))
+                           (Instr 'xorq (list (select-instructions-atomic x) 
+                                              (select-instructions-atomic (Bool #t)))))
+                ]
+            )
+        ]
+        [(Prim cmp (list e1 e2))
+            (list (Instr 'cmpq (list (select-instructions-atomic e2) (select-instructions-atomic e1)))
+                  (Instr (cmp-setcc cmp) (ByteReg 'al) x)
+                  (Instr 'movzbq (ByteReg 'al) x)
+            )
+        ]
     )
 )
 
@@ -279,8 +329,13 @@
 (define (select-instructions p)
   (match p
     [(CProgram info e) 
-        (X86Program info `((start . ,(Block info (select-instructions-statement (dict-ref e 'start))))))]))
-
+        (define instrBlocks (make-hash))
+        (dict-for-each e (lambda (lbl instrs) (dict-set! instrBlocks lbl (Block '() (select-instructions-statement instrs)))))
+        (X86Program info instrBlocks)
+    ]
+  )
+)
+        
 (define (assign-homes-convert e varmap usedCalleeNum)
     (match e
         [(Var e) 
@@ -682,7 +737,7 @@
      ("uniquify", uniquify, interp-Lif, type-check-Lif)
      ("remove complex opera*", remove-complex-opera*, interp-Lif, type-check-Lif)
      ("explicate control", explicate_control, interp-Cif, type-check-Cif)
-    ;;;  ("instruction selection", select-instructions, interp-x86-0)
+     ("instruction selection", select-instructions, interp-x86-0)
     ;;;  ("uncover live", uncover-live, interp-x86-0)
     ;;;  ("interference graph", build-interference, interp-x86-0)
     ;;;  ("allocate registers", allocate-registers, interp-x86-0)
