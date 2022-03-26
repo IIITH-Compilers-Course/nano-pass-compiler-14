@@ -13,6 +13,7 @@
 (require "type-check-Cvar.rkt")
 (require "type-check-Cif.rkt")
 (require "utilities.rkt")
+(require "multigraph.rkt")
 (require "graph-printing.rkt")
 (require "./priority_queue.rkt")
 (provide (all-defined-out))
@@ -436,13 +437,37 @@
     )
 )
 
+
+(define (makeCFG lbl instrs [cfgEdge '()])
+    (match instrs
+        ['() cfgEdge]
+        [(cons a c) 
+            (match a
+               [(Jmp dest) (makeCFG lbl c (append cfgEdge (list (list lbl dest))))] 
+               [(JmpIf cmp dest) (makeCFG lbl c (append cfgEdge (list (list lbl dest))))] 
+               [_ (makeCFG lbl c cfgEdge)]
+        )]
+    )
+)
+
 (define (uncover-live p)
     (match p
-        [(X86Program info body)
-            (match body
-                [`((start . ,(Block sinfo instrs)))
-                    (X86Program info `((start . ,(Block (dict-set sinfo 'live-after (get-live-after instrs)) instrs))))]
+        [(X86Program info e) 
+            (define instrBlocks (make-hash))
+            (define cfgEdges '())
+            (dict-for-each e 
+                (lambda (lbl instrs) (set! cfgEdges (append cfgEdges (makeCFG lbl (Block-instr* instrs)))))
             )
+
+            (displayln "KANISH")
+            (displayln cfgEdges)
+            (define graph (make-multigraph cfgEdges))
+            (define graphTransp (transpose graph))
+            (set! cfgEdges (tsort graphTransp))
+
+            ;;; (for/list ([e cfgEdges]) (display e))
+
+            (X86Program info e)
         ]
     )
 )
@@ -738,7 +763,7 @@
      ("remove complex opera*", remove-complex-opera*, interp-Lif, type-check-Lif)
      ("explicate control", explicate_control, interp-Cif, type-check-Cif)
      ("instruction selection", select-instructions, interp-x86-0)
-    ;;;  ("uncover live", uncover-live, interp-x86-0)
+     ("uncover live", uncover-live, interp-x86-0)
     ;;;  ("interference graph", build-interference, interp-x86-0)
     ;;;  ("allocate registers", allocate-registers, interp-x86-0)
     ;;;  ("patch instructions", patch-instructions, interp-x86-0)
