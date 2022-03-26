@@ -210,6 +210,7 @@
     (match e
         [(Var x) (Return (Var x))]
         [(Int n) (Return (Int n))]
+        [(Bool b) (Return (Bool b))]
         [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_tail exp1) (explicate_tail exp2))]
         [(Prim op es) (Return (Prim op es))]
@@ -219,6 +220,7 @@
     (match e
         [(Var xvar) (Seq (Assign (Var x) (Var xvar)) cont)]
         [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
+        [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
         [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_assign exp1 x cont) (explicate_assign exp2 x cont))]
         [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
@@ -280,6 +282,7 @@
     (match e
         [(Int i) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
         [(Var v) (list (Instr 'movq (list e x)))]
+        [(Bool b) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
         [(Prim '+ (list e1 e2))
             (cond 
               [(equal? x e1) (list (Instr 'addq (list (select-instructions-atomic e2) x)))]
