@@ -222,10 +222,7 @@
         [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
         [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
         [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
-        [(If cond exp1 exp2) 
-            (define blk (create_block cont))
-            (explicate_pred cond (explicate_assign exp1 x blk) (explicate_assign exp2 x blk))
-        ]
+        [(If cond exp1 exp2) (explicate_pred cond (explicate_assign exp1 x cont) (explicate_assign exp2 x cont))]
         [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
         [else (error "explicate_assign unhandled case" e)]))
 
@@ -313,13 +310,13 @@
         ]
         [(Prim 'not (list e1)) 
             (cond 
-                [(eq? e1 x) (list (Instr 'xorq (list (select-instructions-atomic x) 
-                                                     (select-instructions-atomic (Bool #t)))))
+                [(eq? e1 x) (list (Instr 'xorq (list (select-instructions-atomic (Bool #t)) 
+                                                     (select-instructions-atomic x))))
                 ]
                 [else 
                      (list (Instr 'movq (list (select-instructions-atomic e1) x))
-                           (Instr 'xorq (list (select-instructions-atomic x) 
-                                              (select-instructions-atomic (Bool #t)))))
+                           (Instr 'xorq (list (select-instructions-atomic (Bool #t)) 
+                                              (select-instructions-atomic x))))
                 ]
             )
         ]
