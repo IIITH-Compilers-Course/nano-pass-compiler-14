@@ -185,13 +185,13 @@
 
 (define (explicate_pred cnd thn els)
     (match cnd
-        [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (create_block thn)
+        [(Var x) (IfStmt (Prim 'eq? (list x (Bool #t))) (create_block thn)
                     (create_block els))]
         [(Let x rhs body) 
             (explicate_assign rhs x (explicate_pred body thn els))    
         ]
-        [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list (Var e) (Bool #f)) (create_block thn)
-                    (create_block els)))]
+        [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list e (Bool #f))) (create_block thn)
+                    (create_block els))]
         [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<))
                     (IfStmt (Prim op es) (create_block thn) (create_block els))]
         [(Bool b) (if b thn els)]
@@ -223,8 +223,9 @@
         [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
         [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
         [(If cond exp1 exp2) 
-        (define blk (create_block cont))
-        (explicate_pred cond (explicate_assign exp1 x blk) (explicate_assign exp2 x blk))]
+            (define blk (create_block cont))
+            (explicate_pred cond (explicate_assign exp1 x blk) (explicate_assign exp2 x blk))
+        ]
         [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
         [else (error "explicate_assign unhandled case" e)]))
 
