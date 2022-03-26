@@ -463,7 +463,7 @@
             (for ([child children]) (set! initialSet (set-union initialSet (dict-ref label-live child))))
             (define live-after-list (get-live-after instrs initialSet))
             (dict-set! label-live lbl (car live-after-list))
-            (Block (dict-set info "live-after" live-after-list) instrs)
+            (Block (dict-set info 'live-after live-after-list) instrs)
         ]        
     )
 )
@@ -496,6 +496,7 @@
         (when (not (eq? v d)) 
             (match curInstr
                 [(Instr 'movq (list src dest)) (when (not (eq? src v)) (add-edge! interference-graph v d))]
+                [(Instr 'movzbq (list src dest)) (when (not (eq? src v)) (add-edge! interference-graph v d))]
                 [_ (add-edge! interference-graph v d)]
             )
         )
@@ -510,7 +511,7 @@
     )
 )
 
-(define (build-graph list-live-after listOfInstructions [interference-graph (undirected-graph '())]) 
+(define (build-graph list-live-after listOfInstructions interference-graph) 
     (match listOfInstructions
         ['() interference-graph]
         [_  (define curInstr (car listOfInstructions))
@@ -524,10 +525,15 @@
 (define (build-interference p)
     (match p
         [(X86Program info body)
-            (match body
-                [`((start . ,(Block sinfo instrs)))
-                (X86Program (dict-set info 'conflicts (build-graph (dict-ref sinfo 'live-after) instrs)) `((start . ,(Block sinfo instrs))))])
-        ]
+            (define graph (undirected-graph '()))
+            (dict-for-each body
+                (lambda (lbl instrs)
+                    (match (dict-ref body lbl)
+                        [(Block sinfo bbody) (set! graph (build-graph (dict-ref sinfo 'live-after) bbody graph))] 
+                    )
+                )
+            )
+        (X86Program (dict-set info 'conflicts graph) body)]
     )
 )
 
@@ -779,7 +785,7 @@
      ("explicate control", explicate_control, interp-Cif, type-check-Cif)
      ("instruction selection", select-instructions, interp-x86-0)
      ("uncover live", uncover-live, interp-x86-0)
-    ;;;  ("interference graph", build-interference, interp-x86-0)
+     ("interference graph", build-interference, interp-x86-0)
     ;;;  ("allocate registers", allocate-registers, interp-x86-0)
     ;;;  ("patch instructions", patch-instructions, interp-x86-0)
     ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
