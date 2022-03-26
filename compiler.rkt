@@ -423,8 +423,12 @@
 
 (define (get-live-after listOfInstructions initialSet)
     (match listOfInstructions
-        [(list a) (list (extract-reads a))] 
-        [_ (let ([list-live-after (get-live-after (cdr listOfInstructions))])
+        [(list a) (list 
+                    (set-union (extract-reads a)
+                        (set-subtract initialSet (extract-writes a)))
+                  )
+        ] 
+        [_ (let ([list-live-after (get-live-after (cdr listOfInstructions) initialSet)])
             (append (list
                     (set-union (extract-reads (car listOfInstructions))
                         (set-subtract (car list-live-after)  
@@ -449,6 +453,8 @@
     )
 )
 
+(define label-live (make-hash))
+
 (define (uncover-live-block lbl block graph)
     (match block
         [(Block info instrs)
@@ -456,8 +462,8 @@
             (define initialSet (set))
             (for ([child children]) (set! initialSet (set-union initialSet (dict-ref label-live child))))
             (define live-after-list (get-live-after instrs initialSet))
-            (dict-set! label-live (car live-after-list))
-            (Block (dict-set info label live-after-list) instrs)
+            (dict-set! label-live lbl (car live-after-list))
+            (Block (dict-set info "live-after" live-after-list) instrs)
         ]        
     )
 )
@@ -472,12 +478,10 @@
 
             (define graph (make-multigraph cfgEdges))
             (define graphTransp (transpose graph))
-            (define topoOrder (tsort graph))
-            (displayln "KANISH")
-            (displayln cfgEdges)
-
-            (for/list ([label topoOrder] #:when (not (eq? label 'conclusion))) (uncover-live-block label (dict-ref e label) graph))
-
+            (define topoOrder (tsort graphTransp))
+            (dict-set! label-live 'conclusion (set (Reg 'rax) (Reg 'rsp)))
+            
+            (for ([label topoOrder] #:when (not (eq? label 'conclusion))) (dict-set! e label (uncover-live-block label (dict-ref e label) graph)))
             (X86Program info e)
         ]
     )
