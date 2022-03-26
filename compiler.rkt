@@ -691,14 +691,20 @@
 (define (allocate-registers p)
     (match p
         [(X86Program info body)
-            (match body
-                [`((start . ,(Block sinfo instrs)))
-                (print-dot  (dict-ref info 'conflicts) "testGraph.txt")
-                (define graph (dict-ref info 'conflicts))
-                (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
-                (define numSpilledVariables (num-spilled-var varColors))
-                (define usedCallee (used-callee varColors) )
-                (X86Program (dict-set (dict-set info 'stack-space numSpilledVariables) 'used_callee usedCallee) `((start . ,(Block sinfo (assign-homes instrs varColors (length (set-to-list usedCallee)))))))])
+            (define graph (dict-ref info 'conflicts))
+            (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
+            (define numSpilledVariables (num-spilled-var varColors))
+            (define usedCallee (used-callee varColors))
+
+            (dict-for-each body
+                (lambda (lbl instrs)
+                    (match (dict-ref body lbl)
+                        [(Block sinfo instrs) (dict-set! body lbl (Block sinfo (assign-homes instrs varColors (length (set-to-list usedCallee)))))] 
+                    )
+                )
+            )
+
+            (X86Program (dict-set (dict-set info 'stack-space numSpilledVariables) 'used_callee usedCallee) body)
         ]
     )
 )
@@ -786,7 +792,7 @@
      ("instruction selection", select-instructions, interp-x86-0)
      ("uncover live", uncover-live, interp-x86-0)
      ("interference graph", build-interference, interp-x86-0)
-    ;;;  ("allocate registers", allocate-registers, interp-x86-0)
+     ("allocate registers", allocate-registers, interp-x86-0)
     ;;;  ("patch instructions", patch-instructions, interp-x86-0)
     ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
