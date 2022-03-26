@@ -6,10 +6,12 @@
 (require "interp-Lint.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
+(require "interp-Cif.rkt")
 (require "interp-Lif.rkt")
 (require "type-check-Lvar.rkt")
 (require "type-check-Lif.rkt")
 (require "type-check-Cvar.rkt")
+(require "type-check-Cif.rkt")
 (require "utilities.rkt")
 (require "graph-printing.rkt")
 (require "./priority_queue.rkt")
@@ -168,27 +170,47 @@
     [(Program info e) 
         (Program info (rco_exp e))]))
 
+(define basic-blocks '())
+
+(define (create_block tail)
+    (match tail
+        [(Goto label) (Goto label)]
+        [else (let ([label (gensym 'block)])
+            (set! basic-blocks (cons (cons label tail) basic-blocks))
+            (Goto label))
+        ]
+    )
+)
+
 (define (explicate_pred cnd thn els)
     (match cnd
-        ;;; [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t)) (create_block thn)
-        ;;; (create_block els)))]
-        ;;; [(Let x rhs body) ]
-        ;;; [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list (Var x) (Bool #f)) (create_block thn)
-        ;;; (create_block els)))]
-        ;;; [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<))
-        ;;; (IfStmt (Prim op es) (create_block thn)
-        ;;; (create_block els))]
+        [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t)) (create_block thn)
+                    (create_block els)))]
+        [(Let x rhs body) 
+            (explicate_assign rhs x (explicate_pred body thn els))    
+        ]
+        [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list (Var e) (Bool #f)) (create_block thn)
+                    (create_block els)))]
+        [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<))
+                    (IfStmt (Prim op es) (create_block thn) (create_block els))]
         [(Bool b) (if b thn els)]
-        ;;; [(If cnd^ thn^ els^) ___]
-        [_ (error "explicate_pred unhandled case" cnd)]))
-
+        [(If cnd^ thn^ els^)
+            (define thnBlock (create_block thn))
+            (define elsBlock (create_block els)) 
+            (explicate_pred cnd^ (explicate_pred thn^ thnBlock elsBlock)
+                                 (explicate_pred els^ thnBlock elsBlock)
+            )
+        ]
+        [_ (error "explicate_pred unhandled case" cnd)]
+    )
+)
 
 (define (explicate_tail e)
     (match e
         [(Var x) (Return (Var x))]
         [(Int n) (Return (Int n))]
         [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
-        ;;; [(If cond exp1 exp2) (explicate_pred cond (explicate_tail exp1) (explicate_tail exp2))]
+        [(If cond exp1 exp2) (explicate_pred cond (explicate_tail exp1) (explicate_tail exp2))]
         [(Prim op es) (Return (Prim op es))]
         [else (error "explicate_tail unhandled case" e)]))
 
@@ -197,13 +219,14 @@
         [(Var xvar) (Seq (Assign (Var x) (Var xvar)) cont)]
         [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
         [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
+        [(If cond exp1 exp2) (explicate_pred cond (explicate_assign exp1 x cont) (explicate_assign exp2 x cont))]
         [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
         [else (error "explicate_assign unhandled case" e)]))
 
 ;; explicate-control : R1 -> C0
 (define (explicate_control p)
     (match p
-    [(Program info body) (CProgram info (list (cons 'start (explicate_tail body))))]))
+    [(Program info body) (CProgram info (append (list (cons 'start (explicate_tail body))) basic-blocks))]))
 
 (define (select-instructions-atomic e)
     (match e
@@ -658,7 +681,7 @@
      ("shrink", shrink, interp-Lif, type-check-Lif)
      ("uniquify", uniquify, interp-Lif, type-check-Lif)
      ("remove complex opera*", remove-complex-opera*, interp-Lif, type-check-Lif)
-    ;;;  ("explicate control", explicate_control, interp-Cvar, type-check-Cvar)
+     ("explicate control", explicate_control, interp-Cif, type-check-Cif)
     ;;;  ("instruction selection", select-instructions, interp-x86-0)
     ;;;  ("uncover live", uncover-live, interp-x86-0)
     ;;;  ("interference graph", build-interference, interp-x86-0)
