@@ -157,9 +157,8 @@
                 ]
             )
         ]
-        ;;; [(Prim op (e1 e2))]
         [(Let x e body) (Let x (rco_exp e) (rco_exp body))]
-        [(If cond exp1 exp2) ((If (rco_exp cond) (rco_exp exp1) (rco_exp exp2)))]
+        [(If cond exp1 exp2) (If (rco_exp cond) (rco_exp exp1) (rco_exp exp2))]
     )
 )
 
@@ -658,7 +657,7 @@
     ;;;  ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
      ("shrink", shrink, interp-Lif, type-check-Lif)
      ("uniquify", uniquify, interp-Lif, type-check-Lif)
-    ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lvar, type-check-Lvar)
+     ("remove complex opera*", remove-complex-opera*, interp-Lif, type-check-Lif)
     ;;;  ("explicate control", explicate_control, interp-Cvar, type-check-Cvar)
     ;;;  ("instruction selection", select-instructions, interp-x86-0)
     ;;;  ("uncover live", uncover-live, interp-x86-0)
