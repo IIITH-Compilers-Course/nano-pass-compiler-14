@@ -742,8 +742,7 @@
                 ]
             )
         ]
-        [(Block info body) (Block info (append-map patch-instructions-convert body))] 
-        [_ stm]
+        [_ (list stm)]
     )
 )
 
@@ -754,7 +753,7 @@
             (dict-for-each body
                 (lambda (lbl instrs)
                     (match (dict-ref body lbl)
-                        [(Block sinfo instrs) (dict-set! body lbl (Block sinfo (patch-instructions-convert instrs)))] 
+                        [(Block sinfo instrs) (dict-set! body lbl (Block sinfo (append-map patch-instructions-convert instrs)))] 
                     )
                 )
             )
