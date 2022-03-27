@@ -185,7 +185,7 @@
 
 (define (explicate_pred cnd thn els)
     (match cnd
-        [(Var x) (IfStmt (Prim 'eq? (list x (Bool #t))) (create_block thn)
+        [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (create_block thn)
                     (create_block els))]
         [(Let x rhs body) 
             (explicate_assign rhs x (explicate_pred body thn els))    
@@ -230,6 +230,7 @@
 (define (explicate_control p)
     (match p
         [(Program info body) 
+            (set! basic-blocks '())
             (define instrBlocks (make-hash))
             (dict-set! instrBlocks 'start (explicate_tail body))
             (for ([e basic-blocks]) (dict-set! instrBlocks (car e) (cdr e)))
@@ -403,7 +404,8 @@
 
 (define (extract-reads instr)
     (match instr
-        [(Instr 'movq es) (list-to-set (list (car es))) ]
+        [(Instr 'movq es) (list-to-set (list (car es)))]
+        [(Instr 'cmpq es) (list-to-set es)]
         [(Instr 'addq es) (list-to-set es)]
         [(Instr 'subq es) (list-to-set es)]
         [(Instr 'negq es) (list-to-set es)]
@@ -416,6 +418,7 @@
 (define (extract-writes instr)
     (match instr
         [(Instr 'movq es) (list->set (cdr es))]
+        [(Instr 'movzbq es) (list->set (cdr es))]
         [(Instr 'addq es) (list->set (cdr es))]
         [(Instr 'subq es) (list->set (cdr es))]
         [(Instr 'negq es) (list->set es)]
