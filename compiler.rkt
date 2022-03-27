@@ -361,8 +361,8 @@
         [(Var e) 
             (define color (dict-ref varmap (Var e)))
             (cond   
-                [(< color 12) (color-to-register color)]
-                [else (Deref 'rbp (* 8 (- (- 11 color) usedCalleeNum)))]
+                [(< color 13) (color-to-register color)]
+                [else (Deref 'rbp (* 8 (- (- 12 color) usedCalleeNum)))]
             )
         ]
         [_ e]
@@ -573,27 +573,28 @@
     [9 (Reg 'r12)]
     [10 (Reg 'r13)]
     [11 (Reg 'r14)]
+    [12 (Reg 'r15)]
   )
 )
 
 (define (register-to-color reg)
   (match reg
-    [(Reg 'rcx) 1]
-    [(Reg 'rdx) 2]
-    [(Reg 'rsi) 3]
-    [(Reg 'rdi) 4]
-    [(Reg 'r8) 5]
-    [(Reg 'r9) 6]
-    [(Reg 'r10) 7]
-    [(Reg 'r11) 8]
-    [(Reg 'rbx) 9]
-    [(Reg 'r12) 10]
-    [(Reg 'r13) 11]
-    [(Reg 'r14) 12]
+    [(Reg 'rcx) 0]
+    [(Reg 'rdx) 1]
+    [(Reg 'rsi) 2]
+    [(Reg 'rdi) 3]
+    [(Reg 'r8) 4]
+    [(Reg 'r9) 5]
+    [(Reg 'r10) 6]
+    [(Reg 'r11) 7]
+    [(Reg 'rbx) 8]
+    [(Reg 'r12) 9]
+    [(Reg 'r13) 10]
+    [(Reg 'r14) 11]
+    [(Reg 'r15) 12]
     [(Reg 'rax) -1]
     [(Reg 'rsp) -2]
     [(Reg 'rbp) -3]
-    [(Reg 'r15) -4]
   )
 )
 
@@ -694,7 +695,7 @@
                 [(Var _) 
                     (define color (cdr (car varColors)))
                     (cond 
-                        [(< color 12) 
+                        [(< color 13) 
                             (define reg (color-to-register color))
                             (cond 
                                 [(eq? #f (member reg callee-saved-registers)) (used-callee (cdr varColors) usedCallee)]
@@ -798,7 +799,6 @@
             (define S (dict-ref info 'stack-space))
             (define C (length (set-to-list (dict-ref info 'used_callee))))
             (define A (- (align (+ (* 8 S) (* 8 C)) 16) (* 8 C)))
-            
             (dict-set! es 'main 
                 (Block info (append (list (Instr 'pushq (list (Reg 'rbp)))) 
                                                     (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))) 
