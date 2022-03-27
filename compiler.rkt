@@ -492,6 +492,7 @@
 (define (uncover-live p)
     (match p
         [(X86Program info e) 
+            (set! label-live (make-hash))
             (define cfgEdges '())
             (dict-for-each e 
                 (lambda (lbl instrs) (set! cfgEdges (append cfgEdges (makeCFG lbl (Block-instr* instrs)))))
