@@ -140,7 +140,7 @@
                 ]
                 [(and (rco_atm e2) (not (rco_atm e1))) 
                     (define var1 (gensym))
-                    (Let var1 (rco_exp e1) (Prim op (list e2 (Var var1))))
+                    (Let var1 (rco_exp e1) (Prim op (list (Var var1) e2)))
                 ]
                 [else
                     (define var1 (gensym))
@@ -183,6 +183,17 @@
     )
 )
 
+(define (check-cmp cmp)
+    (match cmp
+        ['< #t]
+        ['<= #t]
+        ['> #t]
+        ['>= #t]
+        ['eq? #t]
+        [_ #f]
+    )
+)
+
 (define (explicate_pred cnd thn els)
     (match cnd
         [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (create_block thn)
@@ -192,7 +203,7 @@
         ]
         [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list e (Bool #f))) (create_block thn)
                     (create_block els))]
-        [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<))
+        [(Prim op es) #:when (check-cmp op)
                     (IfStmt (Prim op es) (create_block thn) (create_block els))]
         [(Bool b) (if b thn els)]
         [(If cnd^ thn^ els^)
@@ -247,6 +258,7 @@
         [(Bool #f) (Imm 0)]
     )
 )
+
 (define (cmp-jcc cmprtr)
   (match cmprtr
     ['eq? 'e]
@@ -256,6 +268,7 @@
     ['> 'g]
   )
 )
+
 (define (select-instructions-statement stm)
     (match stm
         ['() '()]
@@ -264,8 +277,10 @@
         [(Goto lbl) (list (Jmp lbl))]
         [(IfStmt (Prim cmp (list e1 e2)) (Goto l1) (Goto l2)) 
                  (list (Instr 'cmpq (list (select-instructions-atomic e2) (select-instructions-atomic e1)))
-                              (JmpIf (cmp-jcc cmp) l1)
-                              (Jmp l2))]
+                       (JmpIf (cmp-jcc cmp) l1)
+                       (Jmp l2)
+                 )
+        ]
     )
 )
 
@@ -295,9 +310,9 @@
         [(Prim '- (list e1 e2))
             (cond 
                 [(equal? x e1) (list (Instr 'subq (list (select-instructions-atomic e2) x)))]
-                [(equal? x e2) (list (Instr 'subq (list (select-instructions-atomic e1) x)))]
+                ;;; [(equal? x e2) (list (Instr 'subq (list (select-instructions-atomic e1) x)))]
                 [else (list (Instr 'movq (list (select-instructions-atomic e1) x))
-                      (Instr 'subq (list x (select-instructions-atomic e2))))]
+                      (Instr 'subq (list (select-instructions-atomic e2) x)))]
             )
         ]
         [(Prim '- (list e1))
@@ -323,8 +338,8 @@
         ]
         [(Prim cmp (list e1 e2))
             (list (Instr 'cmpq (list (select-instructions-atomic e2) (select-instructions-atomic e1)))
-                  (Instr (cmp-setcc cmp) (ByteReg 'al) x)
-                  (Instr 'movzbq (ByteReg 'al) x)
+                  (Instr (cmp-setcc cmp) (list (ByteReg 'al)))
+                  (Instr 'movzbq (list (ByteReg 'al) x))
             )
         ]
     )
