@@ -71,10 +71,10 @@
     (match e
         [(Prim 'and (list e1 e2)) (If (shrink-helper e1) (shrink-helper e2) (Bool #f))]
         [(Prim 'or (list e1 e2)) (If (shrink-helper e1) (Bool #t) (shrink-helper e2) )]
-        [(Let x e body) (Let (shrink-helper x) (shrink-helper e) (shrink-helper body))]
+        [(Let x e1 body) (Let (shrink-helper x) (shrink-helper e1) (shrink-helper body))]
         [(If cond e1 e2) (If (shrink-helper cond) (shrink-helper e1) (shrink-helper e2))]
-        [(Prim '- (list e1 e2)) ((Prim '+ (list (shrink-helper e1) (Prim '- (list (shrink-helper e2))))))] 
-        [(Prim op es) (Prim op (for/list ([e es]) (shrink-helper e)))]
+        [(Prim '- (list e1 e2)) (Prim '+ (list (shrink-helper e1) (Prim '- (list (shrink-helper e2)))))] 
+        [(Prim op es) (Prim op (for/list ([e1 es]) (shrink-helper e1)))]
         [_ e]
     )
 )
