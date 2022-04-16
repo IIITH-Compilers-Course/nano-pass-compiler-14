@@ -1,13 +1,43 @@
-## A1: Compiler for _L<sub>var</sub>_ Language
+## A4: Compiler for *L<sub>Fun</sub>* Language
+
+1. Implement all passes required to support functions by exending *L<sub>Tup</sub>* to *L<sub>Fun</sub>*. Refer fig. 7.10 and exercise 33 from textbook for reference.
+
+## Deadline
+24th April, 2022. 23:59
+
+<br><br>
+
+## A3: Dataflow analysis, Garbage collection and Compiler for *L<sub>while</sub>*, *L<sub>Tup</sub>* Languages
+
+1. Implement all the passes required to support loops by extending *L<sub>if</sub>*
+to *L<sub>while</sub>*. Use fig. 5.8 from textbook for reference.
+2. Implement all the passes required to support tuples(vectors) by extending *L<sub>while</sub>* to *L<sub>Tup</sub>*. Use fig. 6.17 from textbook for reference.
+3. Teams with **4 students** must additionally implement `constant_propagation` pass after `select_instructions`
+
+## Deadline
+13th April, 2022. 23:59
+
+<br><br>
+
+## A2: Register allocation and Compiler for *L<sub>if</sub>* Language
 
 ## Homework questions
+1. Solve **Exercises 13 to 17** and **Exercises 19 to 27** of the text book.
+2. Teams with **4 students** must additionally solve **Exercise 18, 28 and 29** too.
 
+## Deadline
+13th March, 23:59
+
+<br><br>
+
+## A1: Compiler for *L<sub>var</sub>* Language
+
+## Homework questions
 1. Solve **Exercises 2 to 9** of the text book.
 2. Teams with **4 students** must additionally solve **Exercise 10 and 11** too.
 
 ## Deadline
-
-13th February, 23:59
+28rd February, 23:59
 
 ## Homework instructions
 
@@ -38,11 +68,9 @@ This code will be described in the Appendix of the book.
 The `runtime.c` file needs to be compiled and linked with the assembly
 code that your compiler produces. To compile `runtime.c`, do the
 following
-
 ```
    gcc -c -g -std=c99 runtime.c
 ```
-
 This will produce a file named `runtime.o`. The -g flag is to tell the
 compiler to produce debug information that you may need to use
 the gdb (or lldb) debugger.
@@ -51,14 +79,12 @@ Next, suppose your compiler has translated the Racket program in file
 `foo.rkt` into the x86 assembly program in file `foo.s` (The .s filename
 extension is the standard one for assembly programs.) To produce
 an executable program, you can then do
-
 ```
   gcc -g runtime.o foo.s
 ```
-
 which will produce the executable program named a.out.
 
-There is an example "compiler" in the file `compiler.rkt`. That
+There is an example "compiler" in the file `compiler.rkt`.  That
 file defines two passes that translate R_0 programs to R_0 programs
 and tests them using the `interp-tests` function from `utilities.rkt`. It
 tests the passes on the three example programs in the tests
@@ -72,11 +98,3 @@ for that purpose. The usage of `compiler-tests` is quite similar to
 As new languages are added, `run-tests.rkt` will be extended to
 test new passes. You will be provided with new iterations of
 the script for each assignment.
-
-## Team Members:
-
-- Dixit Kumar Garg (2018101077)
-- Kanish Anand (2018101025)
-- Manish (2018101073)
-
-We have done Q:10 under bonus category
