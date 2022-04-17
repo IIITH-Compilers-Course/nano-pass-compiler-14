@@ -7,11 +7,15 @@
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
 (require "interp-Cif.rkt")
+(require "interp-Cwhile.rkt")
 (require "interp-Lif.rkt")
+(require "interp-Lwhile.rkt")
 (require "type-check-Lvar.rkt")
 (require "type-check-Lif.rkt")
+(require "type-check-Lwhile.rkt")
 (require "type-check-Cvar.rkt")
 (require "type-check-Cif.rkt")
+(require "type-check-Cwhile.rkt")
 (require "utilities.rkt")
 (require "multigraph.rkt")
 (require "graph-printing.rkt")
@@ -75,6 +79,9 @@
         [(If cond e1 e2) (If (shrink-helper cond) (shrink-helper e1) (shrink-helper e2))]
         [(Prim '- (list e1 e2)) (Prim '+ (list (shrink-helper e1) (Prim '- (list (shrink-helper e2)))))] 
         [(Prim op es) (Prim op (for/list ([e1 es]) (shrink-helper e1)))]
+        [(SetBang v exp) (SetBang v (shrink-helper exp))]
+        [(Begin es exp) (Begin (for/list ([e es]) (shrink-helper e)) (shrink-helper exp))]
+        [(WhileLoop exp1 exp2) (WhileLoop (shrink-helper exp1) (shrink-helper exp2))]
         [_ e]
     )
 )
@@ -91,7 +98,7 @@
       [(Var x) (Var (dict-ref env x))]
       [(Int n) (Int n)]
       [(Bool b) (Bool b)]
-      [(Void v) (Void v)]
+      [(Void) (Void)]
       [(Let x e body)
         (define var1 (gensym x))
         (define env^ (dict-set env x var1))
@@ -101,18 +108,64 @@
         (If ((uniquify-exp env) cond) ((uniquify-exp env) exp1) ((uniquify-exp env) exp2))
       ]
       [(Prim op es)
-       (Prim op (for/list ([e es]) ((uniquify-exp env) e)))])))
+       (Prim op (for/list ([e es]) ((uniquify-exp env) e)))]
+      [(SetBang v exp) (SetBang (dict-ref env v) ((uniquify-exp env) exp))]
+      [(Begin es exp) (Begin (for/list ([e es]) ((uniquify-exp env) e)) ((uniquify-exp env) exp))]
+      [(WhileLoop exp1 exp2) (WhileLoop ((uniquify-exp env) exp1) ((uniquify-exp env) exp2))]
+)))
 
 ;; uniquify : R1 -> R1
 (define (uniquify p)
   (match p
     [(Program info e) (Program info ((uniquify-exp '()) e))]))
 
+(define (collect-set! e) 
+    (match e
+        [(Var x) (set)]
+        [(Int n) (set)]
+        [(Bool b) (set)]
+        [(Void) (set)]
+        [(Let x rhs body) (set-union (collect-set! rhs) (collect-set! body))]
+        [(SetBang var rhs) (set-union (set var) (collect-set! rhs))]
+        [(Prim op es) (set-union* (for/list ([e es]) (collect-set! e)))]
+        [(If cond exp1 exp2) (set-union (collect-set! cond) (collect-set! exp1) (collect-set! exp2))]
+        [(Begin es exp) (set-union (set-union* (for/list ([e es]) (collect-set! e))) 
+                                   (collect-set! exp))
+        ]
+        [(WhileLoop exp1 exp2) (set-union (collect-set! exp1) (collect-set! exp2))]
+))
+
+(define ((uncover-get!-exp set!-vars) e)
+    (match e
+        [(Var x) (Var x)
+            (if (set-member? set!-vars x) (GetBang x) (Var x))
+        ]
+        [(Int n) (Int n)]
+        [(Bool b) (Bool b)]
+        [(Void) (Void)]
+        [(Let x e body) (Let x ((uncover-get!-exp set!-vars) e) ((uncover-get!-exp set!-vars) body))]
+        [(If cond exp1 exp2) (If ((uncover-get!-exp set!-vars) cond) ((uncover-get!-exp set!-vars) exp1) ((uncover-get!-exp set!-vars) exp2))]
+        [(Prim op es) (Prim op (for/list ([e es]) ((uncover-get!-exp set!-vars) e)))]
+        [(SetBang v exp) (SetBang v ((uncover-get!-exp set!-vars) exp))]
+        [(Begin es exp) (Begin (for/list ([e es]) ((uncover-get!-exp set!-vars) e)) ((uncover-get!-exp set!-vars) exp))]
+        [(WhileLoop exp1 exp2) (WhileLoop ((uncover-get!-exp set!-vars) exp1) ((uncover-get!-exp set!-vars) exp2))]
+    )
+)
+
+(define (uncover-get! p) 
+    (match p 
+        [(Program info body) 
+            (define setVars (collect-set! body))
+            (Program info ((uncover-get!-exp setVars) body))]
+    )
+)
+
 (define (rco_atm e)
     (match e
         [(Var n) #t]
         [(Int n) #t]
         [(Bool n) #t]
+        [(Void) #t]
         [_ #f]
     )
 )
@@ -163,6 +216,10 @@
         ]
         [(Let x e body) (Let x (rco_exp e) (rco_exp body))]
         [(If cond exp1 exp2) (If (rco_exp cond) (rco_exp exp1) (rco_exp exp2))]
+        [(GetBang v) (GetBang v)]
+        [(SetBang v exp) (SetBang v (rco_exp exp))]
+        [(Begin es exp) (Begin (for/list ([e es]) (rco_exp e)) (rco_exp exp))]
+        [(WhileLoop exp1 exp2) (WhileLoop (rco_exp exp1) (rco_exp exp2))]
     )
 )
 
@@ -225,6 +282,14 @@
         [(Bool b) (Return (Bool b))]
         [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_tail exp1) (explicate_tail exp2))]
+        
+        [(WhileLoop cnd body) 
+            (define cndBlock (IfStmt (cnd) (Goto) ()))
+            (define bodyBlock (create_block (append body (Goto 'loop))))
+            (define )
+            (Goto 'loop)
+        ]
+
         [(Prim op es) (Return (Prim op es))]
         [else (error "explicate_tail unhandled case" e)]))
 
@@ -828,10 +893,11 @@
 (define compiler-passes
   `( 
     ;;;  ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
-     ("shrink", shrink, interp-Lif, type-check-Lif)
-     ("uniquify", uniquify, interp-Lif, type-check-Lif)
-     ("remove complex opera*", remove-complex-opera*, interp-Lif, type-check-Lif)
-     ("explicate control", explicate_control, interp-Cif, type-check-Cif)
+     ("shrink", shrink, interp-Lwhile, type-check-Lwhile)
+     ("uniquify", uniquify, interp-Lwhile, type-check-Lwhile)
+     ("uncover get!", uncover-get!, interp-Lwhile)
+     ("remove complex opera*", remove-complex-opera*, interp-Lwhile, type-check-Lwhile)
+     ("explicate control", explicate_control, interp-Cwhile, type-check-Cwhile)
      ("instruction selection", select-instructions, interp-x86-0)
      ("uncover live", uncover-live, interp-x86-0)
      ("interference graph", build-interference, interp-x86-0)
