@@ -91,6 +91,7 @@
       [(Var x) (Var (dict-ref env x))]
       [(Int n) (Int n)]
       [(Bool b) (Bool b)]
+      [(Void v) (Void v)]
       [(Let x e body)
         (define var1 (gensym x))
         (define env^ (dict-set env x var1))
