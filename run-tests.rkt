@@ -33,5 +33,5 @@
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "cond" type-check-Lwhile compiler-passes "cond_r2" (tests-for "cond"))
+(compiler-tests "cond" type-check-Lwhile compiler-passes "cond_test" (tests-for "cond"))
 

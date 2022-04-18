@@ -20,6 +20,7 @@
 (require "multigraph.rkt")
 (require "graph-printing.rkt")
 (require "./priority_queue.rkt")
+(require data/queue)	
 (provide (all-defined-out))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -271,8 +272,31 @@
                                  (explicate_pred els^ thnBlock elsBlock)
             )
         ]
+        [(Begin es exp)
+            (define thnBlock (create_block thn))
+            (define elsBlock (create_block els)) 
+            (foldr explicate_effect (explicate_pred exp thnBlock elsBlock) es)]
         [_ (error "explicate_pred unhandled case" cnd)]
     )
+)
+
+(define (explicate_effect e cont) 
+    (match e
+        [(Prim 'read '()) (Seq e cont)]
+        [(WhileLoop cnd body) 
+            (let ([loop (gensym 'loop)])
+            (define body (explicate_pred cnd (explicate_effect body (Goto loop)) cont)) 
+            (set! basic-blocks (cons (cons loop body) basic-blocks))
+            (Goto loop))
+        ]
+        [(SetBang v exp) (explicate_assign exp v cont)]
+        [(Begin es exp) (explicate_effect exp (foldr explicate_effect cont es))]
+        [(If cond exp1 exp2) (explicate_pred cond (explicate_effect exp1 cont) (explicate_effect exp2 cont))]
+        [(Let x rhs body) (explicate_assign rhs x (explicate_effect body cont))]
+        [_ cont]
+
+
+    ) 
 )
 
 (define (explicate_tail e)
@@ -282,15 +306,10 @@
         [(Bool b) (Return (Bool b))]
         [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_tail exp1) (explicate_tail exp2))]
-        
-        [(WhileLoop cnd body) 
-            (define cndBlock (IfStmt (cnd) (Goto) ()))
-            (define bodyBlock (create_block (append body (Goto 'loop))))
-            (define )
-            (Goto 'loop)
-        ]
-
         [(Prim op es) (Return (Prim op es))]
+        [(SetBang v exp) (explicate_effect e (Return (Void)))]
+        [(WhileLoop cnd body) (explicate_effect e (Return (Void)))]
+        [(Begin es exp) (foldr explicate_effect (explicate_tail exp) es)]
         [else (error "explicate_tail unhandled case" e)]))
 
 (define (explicate_assign e x cont)
@@ -301,6 +320,9 @@
         [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_assign exp1 x cont) (explicate_assign exp2 x cont))]
         [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
+        [(SetBang v exp) (explicate_effect e (Seq (Assign (Var x) (Void)) cont))]
+        [(WhileLoop cnd body) (explicate_effect e (Seq (Assign (Var x) (Void)) cont))]
+        [(Begin es exp) (foldr explicate_effect (explicate_assign exp x cont) es)]
         [else (error "explicate_assign unhandled case" e)]))
 
 ;; explicate-control : R1 -> C0
@@ -322,6 +344,7 @@
         [(Var n) (Var n)]
         [(Bool #t) (Imm 1)]
         [(Bool #f) (Imm 0)]
+        [(Void) (Imm 0)]
     )
 )
 
@@ -542,17 +565,50 @@
 
 (define label-live (make-hash))
 
-(define (uncover-live-block lbl block graph)
+(define (uncover-live-block block initialSet)
     (match block
         [(Block info instrs)
-            (define children (sequence->list (in-neighbors graph lbl)))
-            (define initialSet (set))
-            (for ([child children]) (set! initialSet (set-union initialSet (dict-ref label-live child))))
             (define live-after-list (get-live-after instrs initialSet))
-            (dict-set! label-live lbl (car live-after-list))
-            (Block (dict-set info 'live-after live-after-list) instrs)
+            (dict-set info 'live-after live-after-list)
+            (car live-after-list)
         ]        
     )
+)
+;;; (define (uncover-live-block lbl block graph)
+;;;     (match block
+;;;         [(Block info instrs)
+;;;             (define children (sequence->list (in-neighbors graph lbl)))
+;;;             (define initialSet (set))
+;;;             (for ([child children]) (set! initialSet (set-union initialSet (dict-ref label-live child))))
+;;;             (define live-after-list (get-live-after instrs initialSet))
+;;;             (dict-set! label-live lbl (car live-after-list))
+;;;             (Block (dict-set info 'live-after live-after-list) instrs)
+;;;         ]        
+;;;     )
+;;; )
+
+(define (analyze_dataflow G transfer bottom join e)
+    (define mapping (make-hash))
+    (for ([v (in-vertices G)])
+        (dict-set! mapping v bottom))
+    (define worklist (make-queue))
+    (for ([v (in-vertices G)]  #:when (not (eq? v 'conclusion))) 
+        (enqueue! worklist v))
+    (define trans-G (transpose G))
+    (while (not (queue-empty? worklist))
+        (define node (dequeue! worklist))
+        (define input (for/fold ([state bottom])
+                        ([pred (in-neighbors trans-G node)])
+                      (join state (dict-ref mapping pred))))
+        (displayln "manish")
+        (displayln e)
+        (displayln node)
+        (define output (transfer (dict-ref e node) input))
+        (cond [(not (equal? output (dict-ref mapping node)))
+            (dict-set! mapping node output)
+            (for ([v (in-neighbors G node)])
+                (enqueue! worklist v))]))
+    mapping
 )
 
 (define (uncover-live p)
@@ -568,8 +624,9 @@
             (define graphTransp (transpose graph))
             (define topoOrder (tsort graphTransp))
             (dict-set! label-live 'conclusion (set (Reg 'rax) (Reg 'rsp)))
-            
-            (for ([label topoOrder] #:when (not (eq? label 'conclusion))) (dict-set! e label (uncover-live-block label (dict-ref e label) graph)))
+            (analyze_dataflow graphTransp uncover-live-block (set) set-union e)
+            ;;; (dict-set! e 'conclusion
+            ;;; (for ([label topoOrder] #:when (not (eq? label 'conclusion))) (dict-set! e label (uncover-live-block label (dict-ref e label) graph)))
             (X86Program info e)
         ]
     )
@@ -899,9 +956,9 @@
      ("remove complex opera*", remove-complex-opera*, interp-Lwhile, type-check-Lwhile)
      ("explicate control", explicate_control, interp-Cwhile, type-check-Cwhile)
      ("instruction selection", select-instructions, interp-x86-0)
-     ("uncover live", uncover-live, interp-x86-0)
-     ("interference graph", build-interference, interp-x86-0)
-     ("allocate registers", allocate-registers, interp-x86-0)
-     ("patch instructions", patch-instructions, interp-x86-0)
-     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ;;;  ("uncover live", uncover-live, interp-x86-0)
+    ;;;  ("interference graph", build-interference, interp-x86-0)
+    ;;;  ("allocate registers", allocate-registers, interp-x86-0)
+    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
+    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
