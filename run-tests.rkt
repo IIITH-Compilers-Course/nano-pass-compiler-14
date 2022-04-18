@@ -5,7 +5,9 @@
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
 (require "interp-Lif.rkt")
+(require "interp-Lwhile.rkt")
 (require "type-check-Lif.rkt")
+(require "type-check-Lwhile.rkt")
 (require "interp.rkt")
 (require "compiler.rkt")
 ;; (debug-level 1)
@@ -31,5 +33,5 @@
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "cond" type-check-Lif compiler-passes "cond_test" (tests-for "cond"))
+(compiler-tests "cond" type-check-Lwhile compiler-passes "cond_r2" (tests-for "cond"))
 
