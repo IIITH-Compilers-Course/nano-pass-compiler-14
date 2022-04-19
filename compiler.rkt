@@ -8,14 +8,18 @@
 (require "interp-Cvar.rkt")
 (require "interp-Cif.rkt")
 (require "interp-Cwhile.rkt")
+(require "interp-Cvec.rkt")
 (require "interp-Lif.rkt")
 (require "interp-Lwhile.rkt")
+(require "interp-Lvec.rkt")
 (require "type-check-Lvar.rkt")
 (require "type-check-Lif.rkt")
 (require "type-check-Lwhile.rkt")
+(require "type-check-Lvec.rkt")
 (require "type-check-Cvar.rkt")
 (require "type-check-Cif.rkt")
 (require "type-check-Cwhile.rkt")
+(require "type-check-Cvec.rkt")
 (require "utilities.rkt")
 (require "multigraph.rkt")
 (require "graph-printing.rkt")
@@ -83,6 +87,7 @@
         [(SetBang v exp) (SetBang v (shrink-helper exp))]
         [(Begin es exp) (Begin (for/list ([e es]) (shrink-helper e)) (shrink-helper exp))]
         [(WhileLoop exp1 exp2) (WhileLoop (shrink-helper exp1) (shrink-helper exp2))]
+        [(HasType exp type) (HasType (shrink-helper exp) type)]
         [_ e]
     )
 )
@@ -113,6 +118,7 @@
       [(SetBang v exp) (SetBang (dict-ref env v) ((uniquify-exp env) exp))]
       [(Begin es exp) (Begin (for/list ([e es]) ((uniquify-exp env) e)) ((uniquify-exp env) exp))]
       [(WhileLoop exp1 exp2) (WhileLoop ((uniquify-exp env) exp1) ((uniquify-exp env) exp2))]
+      [(HasType exp type) (HasType ((uniquify-exp env) exp) type)]
 )))
 
 ;; uniquify : R1 -> R1
@@ -134,6 +140,8 @@
                                    (collect-set! exp))
         ]
         [(WhileLoop exp1 exp2) (set-union (collect-set! exp1) (collect-set! exp2))]
+        [(WhileLoop exp1 exp2) (set-union (collect-set! exp1) (collect-set! exp2))]
+        [(HasType exp type) (collect-set! exp)]
 ))
 
 (define ((uncover-get!-exp set!-vars) e)
@@ -150,6 +158,8 @@
         [(SetBang v exp) (SetBang v ((uncover-get!-exp set!-vars) exp))]
         [(Begin es exp) (Begin (for/list ([e es]) ((uncover-get!-exp set!-vars) e)) ((uncover-get!-exp set!-vars) exp))]
         [(WhileLoop exp1 exp2) (WhileLoop ((uncover-get!-exp set!-vars) exp1) ((uncover-get!-exp set!-vars) exp2))]
+        [(HasType exp type) (HasType ((uncover-get!-exp set!-vars) exp) type)]
+
     )
 )
 
@@ -158,6 +168,45 @@
         [(Program info body) 
             (define setVars (collect-set! body))
             (Program info ((uncover-get!-exp setVars) body))]
+    )
+)
+
+(define (hash-type-helper es)
+    (match es
+        ['() ]
+        [_ 
+            (Let (gensym) e body)
+        ]
+    )
+)
+
+(define (expose_allocation_helper e)
+    (match e
+        [(HasType exp type) (displayln exp) (displayln "MNanish")]
+        [(Let x e body) (Let x (expose_allocation_helper e) (expose_allocation_helper body))]
+        [(If cond exp1 exp2) (If (expose_allocation_helper cond) (expose_allocation_helper exp1) (expose_allocation_helper exp2))]
+        [(Prim op es) (Prim op (for/list ([e es]) (expose_allocation_helper e)))]
+        [(SetBang v exp) (SetBang v (expose_allocation_helper exp))]
+        [(Begin es exp) (Begin (for/list ([e es]) (expose_allocation_helper e)) (expose_allocation_helper exp))]
+        [(WhileLoop exp1 exp2) (WhileLoop (expose_allocation_helper exp1) (expose_allocation_helper exp2))]
+        [(HasType exp type)
+            (displayln "Manish") 
+            (displayln exp)
+            (displayln type)
+            (match exp
+                [(Prim vector es) 
+                    (hash-type-helper es)
+                ]
+            )
+        ]
+        [_ e]
+    )
+)
+
+(define (expose_allocation p) 
+    (match p 
+        [(Program info body) 
+            (Program info (expose_allocation_helper body))]
     )
 )
 
@@ -962,15 +1011,16 @@
 (define compiler-passes
   `( 
     ;;;  ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
-     ("shrink", shrink, interp-Lwhile, type-check-Lwhile)
-     ("uniquify", uniquify, interp-Lwhile, type-check-Lwhile)
-     ("uncover get!", uncover-get!, interp-Lwhile)
-     ("remove complex opera*", remove-complex-opera*, interp-Lwhile, type-check-Lwhile)
-     ("explicate control", explicate_control, interp-Cwhile, type-check-Cwhile)
-     ("instruction selection", select-instructions, interp-x86-0)
-     ("uncover live", uncover-live, interp-x86-0)
-     ("interference graph", build-interference, interp-x86-0)
-     ("allocate registers", allocate-registers, interp-x86-0)
-     ("patch instructions", patch-instructions, interp-x86-0)
-     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+     ("shrink", shrink, interp-Lwhile, type-check-Lvec)
+     ("uniquify", uniquify, interp-Lwhile, type-check-Lvec)
+     ("uncover get!", uncover-get!, interp-Lvec)
+     ("expose allocation", expose_allocation, interp-Lvec)
+    ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lwhile, type-check-Lwhile)
+    ;;;  ("explicate control", explicate_control, interp-Cwhile, type-check-Cwhile)
+    ;;;  ("instruction selection", select-instructions, interp-x86-0)
+    ;;;  ("uncover live", uncover-live, interp-x86-0)
+    ;;;  ("interference graph", build-interference, interp-x86-0)
+    ;;;  ("allocate registers", allocate-registers, interp-x86-0)
+    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
+    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
