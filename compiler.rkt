@@ -159,7 +159,6 @@
         [(Begin es exp) (Begin (for/list ([e es]) ((uncover-get!-exp set!-vars) e)) ((uncover-get!-exp set!-vars) exp))]
         [(WhileLoop exp1 exp2) (WhileLoop ((uncover-get!-exp set!-vars) exp1) ((uncover-get!-exp set!-vars) exp2))]
         [(HasType exp type) (HasType ((uncover-get!-exp set!-vars) exp) type)]
-
     )
 )
 
@@ -171,18 +170,33 @@
     )
 )
 
-(define (hash-type-helper es)
+(define (has-type-vectorSet-helper varList vectorName [ind 0])
+    (match varList
+        ['() (Var vectorName)]
+        [(cons a c) (Let '_ (Prim 'vector-set! (list (Var vectorName) (Int ind) (Var a))) (has-type-vectorSet-helper c vectorName (+ ind 1)))]
+    )
+)
+
+(define (has-type-helper es type [varList '()])
     (match es
-        ['() ]
+        ['() 
+            (define vectorName (gensym))
+            (define len (length varList))
+            (define bytes (* 8 (+ len 1)))
+            (Let '_ (If (Prim '< (list (Prim '+ (list (GlobalValue 'free_ptr) (Int bytes))) (GlobalValue 'fromspace_end))) (Void) (Collect bytes)) 
+                (Let vectorName (Allocate len type) (has-type-vectorSet-helper varList  vectorName))
+            )
+        ]
         [_ 
-            (Let (gensym) e body)
+            (define curVarName (gensym))
+            (define curValue (car es))
+            (Let curVarName (expose_allocation_helper curValue) (has-type-helper (cdr es) type (append varList (list curVarName))))
         ]
     )
 )
 
 (define (expose_allocation_helper e)
     (match e
-        [(HasType exp type) (displayln exp) (displayln "MNanish")]
         [(Let x e body) (Let x (expose_allocation_helper e) (expose_allocation_helper body))]
         [(If cond exp1 exp2) (If (expose_allocation_helper cond) (expose_allocation_helper exp1) (expose_allocation_helper exp2))]
         [(Prim op es) (Prim op (for/list ([e es]) (expose_allocation_helper e)))]
@@ -190,13 +204,8 @@
         [(Begin es exp) (Begin (for/list ([e es]) (expose_allocation_helper e)) (expose_allocation_helper exp))]
         [(WhileLoop exp1 exp2) (WhileLoop (expose_allocation_helper exp1) (expose_allocation_helper exp2))]
         [(HasType exp type)
-            (displayln "Manish") 
-            (displayln exp)
-            (displayln type)
             (match exp
-                [(Prim vector es) 
-                    (hash-type-helper es)
-                ]
+                [(Prim 'vector es) (has-type-helper es type)]
             )
         ]
         [_ e]
