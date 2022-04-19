@@ -279,6 +279,7 @@
         [(SetBang v exp) (SetBang v (rco_exp exp))]
         [(Begin es exp) (Begin (for/list ([e es]) (rco_exp e)) (rco_exp exp))]
         [(WhileLoop exp1 exp2) (WhileLoop (rco_exp exp1) (rco_exp exp2))]
+        [_ e]
     )
 )
 
@@ -351,9 +352,10 @@
         [(Begin es exp) (explicate_effect exp (foldr explicate_effect cont es))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_effect exp1 cont) (explicate_effect exp2 cont))]
         [(Let x rhs body) (explicate_assign rhs x (explicate_effect body cont))]
+        [(Allocate len T) cont]
+        [(GlobalValue var) cont]
+        [(Collect bytes) (Seq (Collect bytes) cont)]
         [_ cont]
-
-
     ) 
 )
 
@@ -369,6 +371,8 @@
         [(SetBang v exp) (explicate_effect e (Return (Void)))]
         [(WhileLoop cnd bdy) (explicate_effect e (Return (Void)))]
         [(Begin es exp) (foldr explicate_effect (explicate_tail exp) es)]
+        [(Allocate len type) (Return (Allocate len type))]
+        [(GlobalValue var) (Return (GlobalValue var))]
         [else (error "explicate_tail unhandled case" e)]))
 
 (define (explicate_assign e x cont)
@@ -376,6 +380,7 @@
         [(Var xvar) (Seq (Assign (Var x) (Var xvar)) cont)]
         [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
         [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
+        [(Void) (Seq (Assign (Var x) (Void)) cont)]
         [(GetBang var) (Seq (Assign (Var x) (Var var)) cont)]
         [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_assign exp1 x cont) (explicate_assign exp2 x cont))]
@@ -383,6 +388,9 @@
         [(SetBang v exp) (explicate_effect e (Seq (Assign (Var x) (Void)) cont))]
         [(WhileLoop cnd body) (explicate_effect e (Seq (Assign (Var x) (Void)) cont))]
         [(Begin es exp) (foldr explicate_effect (explicate_assign exp x cont) es)]
+        [(Allocate len type) (Seq (Assign (Var x) e) cont)]
+        [(GlobalValue var) (Seq (Assign (Var x) e) cont)]
+        [(Collect bytes) (Seq (Collect bytes) cont)]
         [else (error "explicate_assign unhandled case" e)]))
 
 ;; explicate-control : R1 -> C0
@@ -431,6 +439,24 @@
                        (Jmp l2)
                  )
         ]
+        [(Seq (Prim 'vector-set! (list vecName ind rhs)) t*)
+                (define offset (* 8 (+ (Int-value ind) 1)))
+                (append (list (Instr 'movq (list vecName (Reg 'r11)))
+                              (Instr 'movq (list (select-instructions-atomic rhs) (Deref 'r11 offset)))
+                        ) 
+                        (select-instructions-statement t*)
+                )
+        ]
+        [(Seq (Collect bytes) t*) 
+            (append
+                (list (Instr 'movq (list (Reg 'r15) (Reg 'rdi)))
+                      (Instr 'movq (list (Imm bytes) (Reg 'rsi)))
+                       ;;;   TODO: argument of collect
+                      (Callq 'collect 2)
+                )
+                (select-instructions-statement t*)
+            )
+        ]
     )
 )
 
@@ -444,11 +470,31 @@
   )
 )
 
+;;; TODO
+(define (ptr? type)
+  (match type
+    [`(Vector ,ts ...) 1]
+    [_ 0]))
+
+(define (ptr-bool? type)
+  (match type
+    [`(Vector ,ts ...) #t]
+    [_ #f]))
+
+(define (get-vector-metadata len T cur_tag cur_ind)
+  (define initial_tag (bitwise-ior 1 (arithmetic-shift len 1)))
+  (for/fold ([cur_tag initial_tag])
+            ([type T]
+             [cur_ind (range 7 (+ 7 len))])
+    (bitwise-ior cur_tag (arithmetic-shift (ptr? type) cur_ind)))
+)
+
 (define (select-instructions-assignment e x)
     (match e
         [(Int i) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
         [(Var v) (list (Instr 'movq (list e x)))]
         [(Bool b) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
+        [(Void) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
         [(Prim '+ (list e1 e2))
             (cond 
               [(equal? x e1) (list (Instr 'addq (list (select-instructions-atomic e2) x)))]
@@ -490,6 +536,38 @@
             (list (Instr 'cmpq (list (select-instructions-atomic e2) (select-instructions-atomic e1)))
                   (Instr (cmp-setcc cmp) (list (ByteReg 'al)))
                   (Instr 'movzbq (list (ByteReg 'al) x))
+            )
+        ]
+        [(Prim 'vector-ref (list vecName ind))
+            (define offset (* 8 (+ (Int-value ind) 1)))
+            (list (Instr 'movq (list vecName (Reg 'r11)))
+                  (Instr 'movq (list (Deref 'r11 offset) x))
+            )
+        ]
+        [(Prim 'vector-set! (list vecName ind rhs))
+            (define offset (* 8 (+ (Int-value ind) 1)))
+            (list (Instr 'movq (list vecName (Reg 'r11)))
+                  (Instr 'movq (list rhs (Deref 'r11 offset)))
+                  (Instr 'movq (list (Imm 0) x))
+            )
+        ]
+        ;;; TODO: Check this
+        [(Prim 'vector-length (list vecName))
+            (list (Instr 'movq (list vecName (Reg 'r11)))
+                  (Instr 'movq (list (Deref 'r11 0) (Reg 'r11)))
+                  (Instr 'sarq (list (Imm 1) (Reg 'r11)))
+                  (Instr 'andq (list (Imm 63) (Reg 'r11)))
+                  (Instr 'movq (list (Reg 'r11) x))
+            )
+        ]
+        [(GlobalValue var) (list (Instr 'movq (list (Global var) x)))]
+        [(Allocate len `(Vector ,T ...))
+            (define tag (get-vector-metadata len T 0 7))
+            (define offset (* 8 (+ len 1)))
+            (list (Instr 'movq (list (Global 'free_ptr) (Reg 'r11)))
+                  (Instr 'addq (list (Imm offset) (Global 'free_ptr)))
+                  (Instr 'movq (list (Imm tag) (Deref 'r11 0)))
+                  (Instr 'movq (list (Reg 'r11) x))
             )
         ]
     )
@@ -879,7 +957,6 @@
     )
 )
 
-
 (define (used-callee varColors [usedCallee '()]) 
     (match varColors
         ['() (list->set usedCallee)]
@@ -1024,12 +1101,12 @@
      ("uniquify", uniquify, interp-Lwhile, type-check-Lvec)
      ("uncover get!", uncover-get!, interp-Lvec)
      ("expose allocation", expose_allocation, interp-Lvec)
-    ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lwhile, type-check-Lwhile)
-    ;;;  ("explicate control", explicate_control, interp-Cwhile, type-check-Cwhile)
-    ;;;  ("instruction selection", select-instructions, interp-x86-0)
-    ;;;  ("uncover live", uncover-live, interp-x86-0)
-    ;;;  ("interference graph", build-interference, interp-x86-0)
-    ;;;  ("allocate registers", allocate-registers, interp-x86-0)
-    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
-    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+     ("remove complex opera*", remove-complex-opera*, interp-Lvec, type-check-Lvec)
+     ("explicate control", explicate_control, interp-Cvec, type-check-Cvec)
+     ("instruction selection", select-instructions, interp-x86-0)
+     ("uncover live", uncover-live, interp-x86-0)
+     ("interference graph", build-interference, interp-x86-0)
+     ("allocate registers", allocate-registers, interp-x86-0)
+     ("patch instructions", patch-instructions, interp-x86-0)
+     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
