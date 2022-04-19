@@ -283,9 +283,9 @@
 (define (explicate_effect e cont) 
     (match e
         [(Prim 'read '()) (Seq e cont)]
-        [(WhileLoop cnd body) 
+        [(WhileLoop cnd bdy) 
             (let ([loop (gensym 'loop)])
-            (define body (explicate_pred cnd (explicate_effect body (Goto loop)) cont)) 
+            (define body (explicate_pred cnd (explicate_effect bdy (Goto loop)) cont)) 
             (set! basic-blocks (cons (cons loop body) basic-blocks))
             (Goto loop))
         ]
@@ -304,11 +304,12 @@
         [(Var x) (Return (Var x))]
         [(Int n) (Return (Int n))]
         [(Bool b) (Return (Bool b))]
-        [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
+        [(GetBang var) (Return (Var var))]
+        [(Let x rhs bdy) (explicate_assign rhs x (explicate_tail bdy))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_tail exp1) (explicate_tail exp2))]
         [(Prim op es) (Return (Prim op es))]
         [(SetBang v exp) (explicate_effect e (Return (Void)))]
-        [(WhileLoop cnd body) (explicate_effect e (Return (Void)))]
+        [(WhileLoop cnd bdy) (explicate_effect e (Return (Void)))]
         [(Begin es exp) (foldr explicate_effect (explicate_tail exp) es)]
         [else (error "explicate_tail unhandled case" e)]))
 
@@ -317,6 +318,7 @@
         [(Var xvar) (Seq (Assign (Var x) (Var xvar)) cont)]
         [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
         [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
+        [(GetBang var) (Seq (Assign (Var x) (Var var)) cont)]
         [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_assign exp1 x cont) (explicate_assign exp2 x cont))]
         [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
@@ -361,6 +363,7 @@
 (define (select-instructions-statement stm)
     (match stm
         ['() '()]
+        [(Seq (Prim 'read '()) t*) (append (list (Callq 'read_int 0)) (select-instructions-statement t*))]
         [(Seq (Assign var exp) t*) (append (select-instructions-assignment exp var) (select-instructions-statement t*))]
         [(Return exp) (append (select-instructions-assignment exp (Reg 'rax)) (list (Jmp 'conclusion)))]
         [(Goto lbl) (list (Jmp lbl))]
@@ -564,15 +567,12 @@
 )
 
 (define label-live (make-hash))
+(define live-after-sets (make-hash))
 
-(define (uncover-live-block block initialSet)
-    (match block
-        [(Block info instrs)
-            (define live-after-list (get-live-after instrs initialSet))
-            (dict-set info 'live-after live-after-list)
-            (car live-after-list)
-        ]        
-    )
+(define (uncover-live-block label instrs initialSet)
+    (define live-after-list (get-live-after instrs initialSet))
+    (dict-set! live-after-sets label live-after-list)
+    (car live-after-list)
 )
 ;;; (define (uncover-live-block lbl block graph)
 ;;;     (match block
@@ -600,14 +600,19 @@
         (define input (for/fold ([state bottom])
                         ([pred (in-neighbors trans-G node)])
                       (join state (dict-ref mapping pred))))
-        (displayln "manish")
-        (displayln e)
-        (displayln node)
-        (define output (transfer (dict-ref e node) input))
+        (define block (dict-ref e node))
+        (define instrs '())
+        (match block
+            [(Block info instr) (set! instrs instr) instr]
+        )
+        (displayln instrs)
+        (define output (transfer node instrs input))
         (cond [(not (equal? output (dict-ref mapping node)))
             (dict-set! mapping node output)
             (for ([v (in-neighbors G node)])
                 (enqueue! worklist v))]))
+    (displayln "Manish")
+    (displayln mapping)
     mapping
 )
 
@@ -625,8 +630,15 @@
             (define topoOrder (tsort graphTransp))
             (dict-set! label-live 'conclusion (set (Reg 'rax) (Reg 'rsp)))
             (analyze_dataflow graphTransp uncover-live-block (set) set-union e)
-            ;;; (dict-set! e 'conclusion
-            ;;; (for ([label topoOrder] #:when (not (eq? label 'conclusion))) (dict-set! e label (uncover-live-block label (dict-ref e label) graph)))
+            (displayln "manish")
+            (displayln live-after-sets)
+            (displayln e)
+            (dict-for-each e 
+                (lambda (lbl block) 
+                    (dict-set! e lbl (Block (dict-set (Block-info block) 'live-after (dict-ref live-after-sets lbl)) (Block-instr* block)))
+                )
+            )
+            (displayln e)
             (X86Program info e)
         ]
     )
@@ -956,9 +968,9 @@
      ("remove complex opera*", remove-complex-opera*, interp-Lwhile, type-check-Lwhile)
      ("explicate control", explicate_control, interp-Cwhile, type-check-Cwhile)
      ("instruction selection", select-instructions, interp-x86-0)
-    ;;;  ("uncover live", uncover-live, interp-x86-0)
-    ;;;  ("interference graph", build-interference, interp-x86-0)
-    ;;;  ("allocate registers", allocate-registers, interp-x86-0)
-    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
-    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+     ("uncover live", uncover-live, interp-x86-0)
+     ("interference graph", build-interference, interp-x86-0)
+     ("allocate registers", allocate-registers, interp-x86-0)
+     ("patch instructions", patch-instructions, interp-x86-0)
+     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
