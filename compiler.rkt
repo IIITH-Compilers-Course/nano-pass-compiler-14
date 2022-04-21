@@ -495,6 +495,28 @@
         [(Var v) (list (Instr 'movq (list e x)))]
         [(Bool b) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
         [(Void) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
+        [(Prim 'vector-ref (list vecName ind))
+            (define offset (* 8 (+ (Int-value ind) 1)))
+            (list (Instr 'movq (list vecName (Reg 'r11)))
+                  (Instr 'movq (list (Deref 'r11 offset) x))
+            )
+        ]
+        [(Prim 'vector-set! (list vecName ind rhs))
+            (define offset (* 8 (+ (Int-value ind) 1)))
+            (list (Instr 'movq (list vecName (Reg 'r11)))
+                  (Instr 'movq (list rhs (Deref 'r11 offset)))
+                  (Instr 'movq (list (Imm 0) x))
+            )
+        ]
+        ;;; TODO: Check this
+        [(Prim 'vector-length (list vecName))
+            (list (Instr 'movq (list vecName (Reg 'r11)))
+                  (Instr 'movq (list (Deref 'r11 0) (Reg 'r11)))
+                  (Instr 'sarq (list (Imm 1) (Reg 'r11)))
+                  (Instr 'andq (list (Imm 63) (Reg 'r11)))
+                  (Instr 'movq (list (Reg 'r11) x))
+            )
+        ]
         [(Prim '+ (list e1 e2))
             (cond 
               [(equal? x e1) (list (Instr 'addq (list (select-instructions-atomic e2) x)))]
@@ -538,28 +560,6 @@
                   (Instr 'movzbq (list (ByteReg 'al) x))
             )
         ]
-        [(Prim 'vector-ref (list vecName ind))
-            (define offset (* 8 (+ (Int-value ind) 1)))
-            (list (Instr 'movq (list vecName (Reg 'r11)))
-                  (Instr 'movq (list (Deref 'r11 offset) x))
-            )
-        ]
-        [(Prim 'vector-set! (list vecName ind rhs))
-            (define offset (* 8 (+ (Int-value ind) 1)))
-            (list (Instr 'movq (list vecName (Reg 'r11)))
-                  (Instr 'movq (list rhs (Deref 'r11 offset)))
-                  (Instr 'movq (list (Imm 0) x))
-            )
-        ]
-        ;;; TODO: Check this
-        [(Prim 'vector-length (list vecName))
-            (list (Instr 'movq (list vecName (Reg 'r11)))
-                  (Instr 'movq (list (Deref 'r11 0) (Reg 'r11)))
-                  (Instr 'sarq (list (Imm 1) (Reg 'r11)))
-                  (Instr 'andq (list (Imm 63) (Reg 'r11)))
-                  (Instr 'movq (list (Reg 'r11) x))
-            )
-        ]
         [(GlobalValue var) (list (Instr 'movq (list (Global var) x)))]
         [(Allocate len `(Vector ,T ...))
             (define tag (get-vector-metadata len T 0 7))
@@ -589,8 +589,9 @@
         [(Var e) 
             (define color (dict-ref varmap (Var e)))
             (cond   
-                [(< color 13) (color-to-register color)]
-                [else (Deref 'rbp (* 8 (- (- 12 color) usedCalleeNum)))]
+                [(< color 11) (color-to-register color)]
+                [(odd? color) (Deref 'rbp (* 8  (+ (/ (- color 9) 2) usedCalleeNum)))]
+                [else (Deref 'r15 (* 8  (/ (- color 10) 2)))]
             )
         ]
         [_ e]
@@ -609,12 +610,16 @@
     (for/list ([stm instrs]) (assign-homes-mapvars varmap stm usedCalleeNum))
 )
 
-(define (check-int e)
-    (if (not (Imm? e) ) #t #f)
+(define (check-cond e)
+    (match e
+        [(Imm e) #f]
+        [(Global g) #f]
+        [_ #t]
+    )
 )
 
 (define (list-to-set lst)
-    (list->set (for/list ([e lst] #:when (check-int e)) e))  
+    (list->set (for/list ([e lst] #:when (check-cond e)) e))  
 )
 
 (define caller-saved-registers (set
@@ -710,18 +715,6 @@
     (dict-set! live-after-sets label live-after-list)
     (car live-after-list)
 )
-;;; (define (uncover-live-block lbl block graph)
-;;;     (match block
-;;;         [(Block info instrs)
-;;;             (define children (sequence->list (in-neighbors graph lbl)))
-;;;             (define initialSet (set))
-;;;             (for ([child children]) (set! initialSet (set-union initialSet (dict-ref label-live child))))
-;;;             (define live-after-list (get-live-after instrs initialSet))
-;;;             (dict-set! label-live lbl (car live-after-list))
-;;;             (Block (dict-set info 'live-after live-after-list) instrs)
-;;;         ]        
-;;;     )
-;;; )
 
 (define (analyze_dataflow G transfer bottom join e)
     (define mapping (make-hash))
@@ -741,14 +734,11 @@
         (match block
             [(Block info instr) (set! instrs instr) instr]
         )
-        (displayln instrs)
         (define output (transfer node instrs input))
         (cond [(not (equal? output (dict-ref mapping node)))
             (dict-set! mapping node output)
             (for ([v (in-neighbors G node)])
                 (enqueue! worklist v))]))
-    (displayln "Manish")
-    (displayln mapping)
     mapping
 )
 
@@ -756,6 +746,7 @@
     (match p
         [(X86Program info e) 
             (set! label-live (make-hash))
+            (set! live-after-sets (make-hash))
             (define cfgEdges '())
             (dict-for-each e 
                 (lambda (lbl instrs) (set! cfgEdges (append cfgEdges (makeCFG lbl (Block-instr* instrs)))))
@@ -766,15 +757,11 @@
             (define topoOrder (tsort graphTransp))
             (dict-set! label-live 'conclusion (set (Reg 'rax) (Reg 'rsp)))
             (analyze_dataflow graphTransp uncover-live-block (set) set-union e)
-            (displayln "manish")
-            (displayln live-after-sets)
-            (displayln e)
             (dict-for-each e 
                 (lambda (lbl block) 
                     (dict-set! e lbl (Block (dict-set (Block-info block) 'live-after (dict-ref live-after-sets lbl)) (Block-instr* block)))
                 )
             )
-            (displayln e)
             (X86Program info e)
         ]
     )
@@ -790,6 +777,14 @@
             (match curInstr
                 [(Instr 'movq (list src dest)) (when (not (eq? src v)) (add-edge! interference-graph v d))]
                 [(Instr 'movzbq (list src dest)) (when (not (eq? src v)) (add-edge! interference-graph v d))]
+                [(Callq 'collect n) 
+                    (cond 
+                        [(and (not (set-member? (list->set allRegisters) v)) (ptr-bool? (dict-ref local-vars (Var-name v)))) 
+                            (for ([reg allRegisters]) (add-edge! interference-graph reg v))
+                        ]
+                    )
+                    (add-edge! interference-graph v d)
+                ]
                 [_ (add-edge! interference-graph v d)]
             )
         )
@@ -815,9 +810,14 @@
     )
 )
 
+(define local-vars (make-hash))
+
 (define (build-interference p)
     (match p
         [(X86Program info body)
+            (set! local-vars (dict-ref info 'locals-types))
+            (displayln "manish")
+            (displayln (dict-ref info 'locals-types))
             (define graph (undirected-graph '()))
             (dict-for-each body
                 (lambda (lbl instrs)
@@ -839,12 +839,10 @@
     [4 (Reg 'r8)]
     [5 (Reg 'r9)]
     [6 (Reg 'r10)]
-    [7 (Reg 'r11)]
-    [8 (Reg 'rbx)]
-    [9 (Reg 'r12)]
-    [10 (Reg 'r13)]
-    [11 (Reg 'r14)]
-    [12 (Reg 'r15)]
+    [7 (Reg 'rbx)]
+    [8 (Reg 'r12)]
+    [9 (Reg 'r13)]
+    [10 (Reg 'r14)]
   )
 )
 
@@ -857,16 +855,37 @@
     [(Reg 'r8) 4]
     [(Reg 'r9) 5]
     [(Reg 'r10) 6]
-    [(Reg 'r11) 7]
-    [(Reg 'rbx) 8]
-    [(Reg 'r12) 9]
-    [(Reg 'r13) 10]
-    [(Reg 'r14) 11]
-    [(Reg 'r15) 12]
+    [(Reg 'rbx) 7]
+    [(Reg 'r12) 8]
+    [(Reg 'r13) 9]
+    [(Reg 'r14) 10]
     [(Reg 'rax) -1]
     [(Reg 'rsp) -2]
     [(Reg 'rbp) -3]
+    [(Reg 'r11) -4]
+    [(Reg 'r15) -5]
   )
+)
+
+(define allRegisters 
+    (list
+        (Reg 'rcx)
+        (Reg 'rdx)
+        (Reg 'rsi)
+        (Reg 'rdi)
+        (Reg 'r8)
+        (Reg 'r9)
+        (Reg 'r10)
+        (Reg 'rbx)
+        (Reg 'r12)
+        (Reg 'r13)
+        (Reg 'r14)
+        (Reg 'rax)
+        (Reg 'rsp)
+        (Reg 'rbp)
+        (Reg 'r15)
+        (Reg 'r11)
+    )
 )
 
 (struct node (name [blockedColorsSet #:mutable]))
@@ -876,10 +895,16 @@
     (< (length (set-to-list (node-blockedColorsSet node1))) (length (set-to-list (node-blockedColorsSet node2)))) )
 )
 
-(define (mex s [i 0])
+(define (mex v s [i 0])
+    (if (eq? i 11) 
+        (if (ptr-bool? (dict-ref local-vars v)) (set! i 12) (set! i 11)) 
+        (set! i i)
+    )
+
     (match (member i s)
         [#f i]
-        [_ (mex s (+ i 1))]
+        [_ (if (< i 11) (mex v s (+ i 1)) (mex v s (+ i 2)))
+        ]
     )
 )
 
@@ -909,7 +934,7 @@
                    (assign-next q vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
                 ]
                 [_ 
-                    (define curColor (mex (set-to-list (node-blockedColorsSet curNode)) ))
+                    (define curColor (mex (node-name curNode) (set-to-list (node-blockedColorsSet curNode))))
                     (define updatedQ (update-neighbours q vname-pointer curColor (sequence->list (in-neighbors graph (node-name curNode))) ))
                     (assign-next updatedQ vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
                 ]
@@ -939,7 +964,7 @@
     (match varColors
         ['()
             (cond
-                [(> max 11) (- max 11)]
+                [(> max 10) (/ (- max 9) 2) ]
                 [else 0]
             ) 
         ]
@@ -948,7 +973,8 @@
                 [(Var _) (define color (cdr (car varColors)) )
                     (cond 
                         [(< color max) (num-spilled-var (cdr varColors) max)]
-                        [else (num-spilled-var (cdr varColors) color)]
+                        [(odd? color) (num-spilled-var (cdr varColors) color)]
+                        [else (num-spilled-var (cdr varColors) max)]
                     )
                 ]
                 [_ (num-spilled-var (cdr varColors) max)]
@@ -956,6 +982,30 @@
         ]
     )
 )
+
+(define (num-root-spilled-var varColors [max 0]) 
+    (match varColors
+        ['()
+            (cond
+                [(> max 10) (/ (- max 10) 2) ]
+                [else 0]
+            ) 
+        ]
+        [_  
+            (match (car (car varColors))
+                [(Var _) (define color (cdr (car varColors)) )
+                    (cond 
+                        [(< color max) (num-root-spilled-var (cdr varColors) max)]
+                        [(even? color) (num-root-spilled-var (cdr varColors) color)]
+                        [else (num-root-spilled-var (cdr varColors) max)]
+                    )
+                ]
+                [_ (num-root-spilled-var (cdr varColors) max)]
+            )
+        ]
+    )
+)
+
 
 (define (used-callee varColors [usedCallee '()]) 
     (match varColors
@@ -987,6 +1037,7 @@
             (define graph (dict-ref info 'conflicts))
             (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
             (define numSpilledVariables (num-spilled-var varColors))
+            (define numRootSpilledVariables (num-root-spilled-var varColors))
             (define usedCallee (used-callee varColors))
 
             (dict-for-each body
@@ -997,7 +1048,7 @@
                 )
             )
 
-            (X86Program (dict-set (dict-set info 'stack-space numSpilledVariables) 'used_callee usedCallee) body)
+            (X86Program (dict-set (dict-set (dict-set info 'stack-space numSpilledVariables) 'num-root-spills numRootSpilledVariables) 'used_callee usedCallee) body)
         ]
     )
 )
@@ -1062,6 +1113,13 @@
     (for/list ([rg (reverse (set-to-list registers))]) (Instr 'popq (list rg)))
 )
 
+(define (zeroOutRootStack num [i 0])
+    (cond 
+        [(> i num) '()]
+        [else (append (list (Instr 'movq (list (Imm 0) (Deref 'r15 (* 8 i))))) (zeroOutRootStack num (+ i 1)))]
+    )
+)
+
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
     (match p
@@ -1069,17 +1127,27 @@
             (define S (dict-ref info 'stack-space))
             (define C (length (set-to-list (dict-ref info 'used_callee))))
             (define A (- (align (+ (* 8 S) (* 8 C)) 16) (* 8 C)))
+            (define R (* 8 (dict-ref info 'num-root-spills)))
             (dict-set! es 'main 
                 (Block info (append (list (Instr 'pushq (list (Reg 'rbp)))) 
                                                     (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))) 
                                                     (push-calle-saved (dict-ref info 'used_callee)) 
                                                     (list (Instr 'subq (list (Imm A) (Reg 'rsp))))
+                                                    
+                                                    (list (Instr 'movq (list (Imm 16384) (Reg 'rdi))))
+                                                    (list (Instr 'movq (list (Imm 16384) (Reg 'rsi))))
+                                                    (list (Callq 'initialize 2))
+                                                    (list (Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15))))
+
+                                                    (zeroOutRootStack (dict-ref info 'num-root-spills))
+                                                    (list (Instr 'addq (list (Imm R) (Reg 'r15))))
                                                     (list (Jmp 'start))
                             )
                 )
             )
             (dict-set! es 'conclusion 
-                            (Block info (append  (list (Instr 'addq (list (Imm A) (Reg 'rsp)))) 
+                            (Block info (append  (list  (Instr 'subq (list (Imm R) (Reg 'r15))))
+                                                        (list (Instr 'addq (list (Imm A) (Reg 'rsp))))
                                                         (pop-calle-saved (dict-ref info 'used_callee))
                                                         (list (Instr 'popq (list (Reg 'rbp))))
                                                         (list (Retq))
