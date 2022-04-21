@@ -323,6 +323,11 @@
                     (create_block els))]
         [(Prim op es) #:when (check-cmp op)
                     (IfStmt (Prim op es) (create_block thn) (create_block els))]
+        [(Prim 'vect es) #:when (eq? op 'vector-ref)
+                  (define tmp (gensym 'tmp))
+                  (define new-cont (IfStmt (Prim 'eq? (list (Var tmp) (Bool #t))) (create_block thn)
+                                           (create_block els)))
+                  (Seq (Assign (Var tmp) cnd) new-cont)]
         [(Bool b) (if b thn els)]
         [(If cnd^ thn^ els^)
             (define thnBlock (create_block thn))
@@ -504,7 +509,7 @@
         [(Prim 'vector-set! (list vecName ind rhs))
             (define offset (* 8 (+ (Int-value ind) 1)))
             (list (Instr 'movq (list vecName (Reg 'r11)))
-                  (Instr 'movq (list rhs (Deref 'r11 offset)))
+                  (Instr 'movq (list (select-instructions-atomic rhs) (Deref 'r11 offset)))
                   (Instr 'movq (list (Imm 0) x))
             )
         ]
@@ -816,8 +821,6 @@
     (match p
         [(X86Program info body)
             (set! local-vars (dict-ref info 'locals-types))
-            (displayln "manish")
-            (displayln (dict-ref info 'locals-types))
             (define graph (undirected-graph '()))
             (dict-for-each body
                 (lambda (lbl instrs)
@@ -897,7 +900,7 @@
 
 (define (mex v s [i 0])
     (if (eq? i 11) 
-        (if (ptr-bool? (dict-ref local-vars v)) (set! i 12) (set! i 11)) 
+        (if (ptr-bool? (dict-ref local-vars (Var-name v))) (set! i 12) (set! i 11)) 
         (set! i i)
     )
 
@@ -1015,7 +1018,7 @@
                 [(Var _) 
                     (define color (cdr (car varColors)))
                     (cond 
-                        [(< color 13) 
+                        [(< color 11) 
                             (define reg (color-to-register color))
                             (cond 
                                 [(eq? #f (member reg callee-saved-registers)) (used-callee (cdr varColors) usedCallee)]
