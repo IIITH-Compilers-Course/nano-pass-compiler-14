@@ -956,6 +956,8 @@
                    (assign-next q vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
                 ]
                 [_ 
+                    (displayln "Manish")
+                    (displayln curNode)
                     (define curColor (mex (node-name curNode) (set-to-list (node-blockedColorsSet curNode))))
                     (define updatedQ (update-neighbours q vname-pointer curColor (sequence->list (in-neighbors graph (node-name curNode))) ))
                     (assign-next updatedQ vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
