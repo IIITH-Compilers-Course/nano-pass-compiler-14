@@ -126,54 +126,10 @@
   (match p
     [(Program info e) (Program info ((uniquify-exp '()) e))]))
 
-(define (collect-set! e) 
-    (match e
-        [(Var x) (set)]
-        [(Int n) (set)]
-        [(Bool b) (set)]
-        [(Void) (set)]
-        [(Let x rhs body) (set-union (collect-set! rhs) (collect-set! body))]
-        [(SetBang var rhs) (set-union (set var) (collect-set! rhs))]
-        [(Prim op es) (set-union* (for/list ([e es]) (collect-set! e)))]
-        [(If cond exp1 exp2) (set-union (collect-set! cond) (collect-set! exp1) (collect-set! exp2))]
-        [(Begin es exp) (set-union (set-union* (for/list ([e es]) (collect-set! e))) 
-                                   (collect-set! exp))
-        ]
-        [(WhileLoop exp1 exp2) (set-union (collect-set! exp1) (collect-set! exp2))]
-        [(WhileLoop exp1 exp2) (set-union (collect-set! exp1) (collect-set! exp2))]
-        [(HasType exp type) (collect-set! exp)]
-))
-
-(define ((uncover-get!-exp set!-vars) e)
-    (match e
-        [(Var x) (Var x)
-            (if (set-member? set!-vars x) (GetBang x) (Var x))
-        ]
-        [(Int n) (Int n)]
-        [(Bool b) (Bool b)]
-        [(Void) (Void)]
-        [(Let x e body) (Let x ((uncover-get!-exp set!-vars) e) ((uncover-get!-exp set!-vars) body))]
-        [(If cond exp1 exp2) (If ((uncover-get!-exp set!-vars) cond) ((uncover-get!-exp set!-vars) exp1) ((uncover-get!-exp set!-vars) exp2))]
-        [(Prim op es) (Prim op (for/list ([e es]) ((uncover-get!-exp set!-vars) e)))]
-        [(SetBang v exp) (SetBang v ((uncover-get!-exp set!-vars) exp))]
-        [(Begin es exp) (Begin (for/list ([e es]) ((uncover-get!-exp set!-vars) e)) ((uncover-get!-exp set!-vars) exp))]
-        [(WhileLoop exp1 exp2) (WhileLoop ((uncover-get!-exp set!-vars) exp1) ((uncover-get!-exp set!-vars) exp2))]
-        [(HasType exp type) (HasType ((uncover-get!-exp set!-vars) exp) type)]
-    )
-)
-
-(define (uncover-get! p) 
-    (match p 
-        [(Program info body) 
-            (define setVars (collect-set! body))
-            (Program info ((uncover-get!-exp setVars) body))]
-    )
-)
-
 (define (has-type-vectorSet-helper varList vectorName [ind 0])
     (match varList
         ['() (Var vectorName)]
-        [(cons a c) (Let '_ (Prim 'vector-set! (list (Var vectorName) (Int ind) (Var a))) (has-type-vectorSet-helper c vectorName (+ ind 1)))]
+        [(cons a c) (Let (gensym '_) (Prim 'vector-set! (list (Var vectorName) (Int ind) (Var a))) (has-type-vectorSet-helper c vectorName (+ ind 1)))]
     )
 )
 
@@ -183,7 +139,7 @@
             (define vectorName (gensym))
             (define len (length varList))
             (define bytes (* 8 (+ len 1)))
-            (Let '_ (If (Prim '< (list (Prim '+ (list (GlobalValue 'free_ptr) (Int bytes))) (GlobalValue 'fromspace_end))) (Void) (Collect bytes)) 
+            (Let (gensym '_) (If (Prim '< (list (Prim '+ (list (GlobalValue 'free_ptr) (Int bytes))) (GlobalValue 'fromspace_end))) (Void) (Collect bytes)) 
                 (Let vectorName (Allocate len type) (has-type-vectorSet-helper varList  vectorName))
             )
         ]
@@ -219,6 +175,49 @@
     )
 )
 
+(define (collect-set! e) 
+    (match e
+        [(Var x) (set)]
+        [(Int n) (set)]
+        [(Bool b) (set)]
+        [(Void) (set)]
+        [(Let x rhs body) (set-union (collect-set! rhs) (collect-set! body))]
+        [(SetBang var rhs) (set-union (set var) (collect-set! rhs))]
+        [(Prim op es) (set-union* (for/list ([e es]) (collect-set! e)))]
+        [(If cond exp1 exp2) (set-union (collect-set! cond) (collect-set! exp1) (collect-set! exp2))]
+        [(Begin es exp) (set-union (set-union* (for/list ([e es]) (collect-set! e))) 
+                                   (collect-set! exp))
+        ]
+        [(WhileLoop exp1 exp2) (set-union (collect-set! exp1) (collect-set! exp2))]
+        [_ (set)]
+))
+
+(define ((uncover-get!-exp set!-vars) e)
+    (match e
+        [(Var x) (Var x)
+            (if (set-member? set!-vars x) (GetBang x) (Var x))
+        ]
+        [(Int n) (Int n)]
+        [(Bool b) (Bool b)]
+        [(Void) (Void)]
+        [(Let x e body) (Let x ((uncover-get!-exp set!-vars) e) ((uncover-get!-exp set!-vars) body))]
+        [(If cond exp1 exp2) (If ((uncover-get!-exp set!-vars) cond) ((uncover-get!-exp set!-vars) exp1) ((uncover-get!-exp set!-vars) exp2))]
+        [(Prim op es) (Prim op (for/list ([e es]) ((uncover-get!-exp set!-vars) e)))]
+        [(SetBang v exp) (SetBang v ((uncover-get!-exp set!-vars) exp))]
+        [(Begin es exp) (Begin (for/list ([e es]) ((uncover-get!-exp set!-vars) e)) ((uncover-get!-exp set!-vars) exp))]
+        [(WhileLoop exp1 exp2) (WhileLoop ((uncover-get!-exp set!-vars) exp1) ((uncover-get!-exp set!-vars) exp2))]
+        [_ e]
+    )
+)
+
+(define (uncover-get! p) 
+    (match p 
+        [(Program info body) 
+            (define setVars (collect-set! body))
+            (Program info ((uncover-get!-exp setVars) body))]
+    )
+)
+
 (define (rco_atm e)
     (match e
         [(Var n) #t]
@@ -241,6 +240,15 @@
                 [else
                     (define var (gensym))
                     (Let var (rco_exp e1) (Prim 'not (list (Var var))))
+                ]
+            )
+        ]
+        [(Prim op (list e1))
+            (cond
+                [(rco_atm e1) (Prim op (list e1))]
+                [else
+                    (define tmp-var (gensym))
+                    (Let tmp-var (rco_exp e1) (Prim op (list (Var tmp-var))))
                 ]
             )
         ]
@@ -512,8 +520,6 @@
 )
 
 (define (select-instructions-assignment e x)
-    (displayln "KANISH")
-    (displayln e)
     (match e
         [(Int i) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
         [(Var v) (list (Instr 'movq (list e x)))]
@@ -606,32 +612,6 @@
         (X86Program info instrBlocks)
     ]
   )
-)
-        
-(define (assign-homes-convert e varmap usedCalleeNum)
-    (match e
-        [(Var e) 
-            (define color (dict-ref varmap (Var e)))
-            (cond   
-                [(< color 11) (color-to-register color)]
-                [(odd? color) (Deref 'rbp (* 8  (+ (/ (- color 9) 2) usedCalleeNum)))]
-                [else (Deref 'r15 (* 8  (/ (- color 10) 2)))]
-            )
-        ]
-        [_ e]
-    )
-)
-
-(define (assign-homes-mapvars varmap stm usedCalleeNum)
-    (match stm
-        [(Instr op args) (Instr op (map (lambda (x) (assign-homes-convert x varmap usedCalleeNum)) args))]
-        [_ stm]
-    )
-)
-
-;; assign-homes : pseudo-x86 -> pseudo-x86
-(define (assign-homes instrs varmap usedCalleeNum)
-    (for/list ([stm instrs]) (assign-homes-mapvars varmap stm usedCalleeNum))
 )
 
 (define (check-cond e)
@@ -912,6 +892,32 @@
 
 (struct node (name [blockedColorsSet #:mutable]))
 
+(define (assign-homes-convert e varmap usedCalleeNum)
+    (match e
+        [(Var e) 
+            (define color (dict-ref varmap (Var e)))
+            (cond   
+                [(< color 11) (color-to-register color)]
+                [(odd? color) (Deref 'rbp (* 8  (+ (/ (- color 9) 2) usedCalleeNum)))]
+                [else (Deref 'r15 (* 8  (/ (- color 10) 2)))]
+            )
+        ]
+        [_ e]
+    )
+)
+
+(define (assign-homes-mapvars varmap stm usedCalleeNum)
+    (match stm
+        [(Instr op args) (Instr op (map (lambda (x) (assign-homes-convert x varmap usedCalleeNum)) args))]
+        [_ stm]
+    )
+)
+
+;; assign-homes : pseudo-x86 -> pseudo-x86
+(define (assign-homes instrs varmap usedCalleeNum)
+    (for/list ([stm instrs]) (assign-homes-mapvars varmap stm usedCalleeNum))
+)
+
 (define cmp-<                 
   (lambda (node1 node2)         
     (< (length (set-to-list (node-blockedColorsSet node1))) (length (set-to-list (node-blockedColorsSet node2)))) )
@@ -1189,8 +1195,8 @@
     ;;;  ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
      ("shrink", shrink, interp-Lwhile, type-check-Lvec)
      ("uniquify", uniquify, interp-Lwhile, type-check-Lvec)
-     ("uncover get!", uncover-get!, interp-Lvec)
-     ("expose allocation", expose_allocation, interp-Lvec)
+     ("expose allocation", expose_allocation, interp-Lvec, type-check-Lvec)
+     ("uncover get!", uncover-get!, interp-Lvec, type-check-Lvec)
      ("remove complex opera*", remove-complex-opera*, interp-Lvec, type-check-Lvec)
      ("explicate control", explicate_control, interp-Cvec, type-check-Cvec)
      ("instruction selection", select-instructions, interp-x86-0)
