@@ -323,11 +323,11 @@
                     (create_block els))]
         [(Prim op es) #:when (check-cmp op)
                     (IfStmt (Prim op es) (create_block thn) (create_block els))]
-        [(Prim 'vect es) #:when (eq? op 'vector-ref)
+        [(Prim 'vector-ref es) 
                   (define tmp (gensym 'tmp))
-                  (define new-cont (IfStmt (Prim 'eq? (list (Var tmp) (Bool #t))) (create_block thn)
-                                           (create_block els)))
-                  (Seq (Assign (Var tmp) cnd) new-cont)]
+                  (Seq (Assign (Var tmp) cnd) 
+                        (IfStmt (Prim 'eq? (list (Var tmp) (Bool #t))) (create_block thn)
+                                           (create_block els)))]
         [(Bool b) (if b thn els)]
         [(If cnd^ thn^ els^)
             (define thnBlock (create_block thn))
