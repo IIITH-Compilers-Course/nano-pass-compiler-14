@@ -264,6 +264,23 @@
                 ]
             )
         ]
+        [(Prim op (list e1 e2 e3))
+            (cond
+                [(not (rco_atm e1))
+                    (define tmp-var (gensym))
+                    (Let tmp-var (rco_exp e1) (rco_exp (Prim op (list (Var tmp-var) e2 e3))))
+                ]
+                [(not (rco_atm e2))
+                    (define tmp-var (gensym))
+                    (Let tmp-var (rco_exp e2) (rco_exp (Prim op (list e1 (Var tmp-var) e3))))
+                ]
+                [(not (rco_atm e3))
+                    (define tmp-var (gensym))
+                    (Let tmp-var (rco_exp e3) (rco_exp (Prim op (list e1 e2 (Var tmp-var)))))
+                ]
+                [else (Prim op (list e1 e2 e3))]
+            )
+        ]
         [(Prim '- (list e1)) 
             (cond
                 [(rco_atm e1) e]
@@ -321,13 +338,13 @@
         ]
         [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list e (Bool #f))) (create_block thn)
                     (create_block els))]
-        [(Prim op es) #:when (check-cmp op)
-                    (IfStmt (Prim op es) (create_block thn) (create_block els))]
         [(Prim 'vector-ref es) 
                   (define tmp (gensym 'tmp))
                   (Seq (Assign (Var tmp) cnd) 
                         (IfStmt (Prim 'eq? (list (Var tmp) (Bool #t))) (create_block thn)
                                            (create_block els)))]
+        [(Prim op es) #:when (check-cmp op)
+                    (IfStmt (Prim op es) (create_block thn) (create_block els))]
         [(Bool b) (if b thn els)]
         [(If cnd^ thn^ els^)
             (define thnBlock (create_block thn))
@@ -495,6 +512,8 @@
 )
 
 (define (select-instructions-assignment e x)
+    (displayln "KANISH")
+    (displayln e)
     (match e
         [(Int i) (list (Instr 'movq (list (select-instructions-atomic e) x)))]
         [(Var v) (list (Instr 'movq (list e x)))]
@@ -1058,10 +1077,10 @@
 
 (define (patch-instructions-convert stm)
     (match stm
-        [(Instr 'movzbq (list (ByteReg 'al) (Deref 'rbp offset))) 
+        [(Instr 'movzbq (list (ByteReg 'al) (Deref reg1 offset))) 
                 (list
                     (Instr 'movzbq (list (ByteReg 'al) (Reg 'rax)))
-                    (Instr 'movq (list (Reg 'rax) (Deref 'rbp offset)))
+                    (Instr 'movq (list (Reg 'rax) (Deref reg1 offset)))
                 )
         ]
         [(Instr 'cmpq (list src (Imm n))) 
@@ -1070,13 +1089,13 @@
                     (Instr 'cmpq (list src (Reg 'rax)))
                 )
         ]
-        [(Instr op (list (Deref 'rbp offset_1) (Deref 'rbp offset_2))) 
+        [(Instr op (list (Deref reg1 offset_1) (Deref reg2 offset_2))) 
             (cond
                 [(eq? offset_1 offset_2) '()]
                 [else 
                     (list
-                        (Instr 'movq (list (Deref 'rbp offset_1) (Reg 'rax)))
-                        (Instr op (list (Reg 'rax) (Deref 'rbp offset_2)))
+                        (Instr 'movq (list (Deref reg1 offset_1) (Reg 'rax)))
+                        (Instr op (list (Reg 'rax) (Deref reg2 offset_2)))
                     )
                 ]
             )
@@ -1118,7 +1137,7 @@
 
 (define (zeroOutRootStack num [i 0])
     (cond 
-        [(> i num) '()]
+        [(> i (- num 1)) '()]
         [else (append (list (Instr 'movq (list (Imm 0) (Deref 'r15 (* 8 i))))) (zeroOutRootStack num (+ i 1)))]
     )
 )
