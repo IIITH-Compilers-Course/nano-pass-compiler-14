@@ -1,6 +1,0 @@
-(let ([x (read)])
-  (let ([z (read)])
-    (+ (if (eq? z 0)
-           (let ([y (read)]) (+ y 10))
-           (read))
-       x)))
