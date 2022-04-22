@@ -361,10 +361,14 @@
                                  (explicate_pred els^ thnBlock elsBlock)
             )
         ]
+        ;;; [(Begin es exp)
+        ;;;     (define thnBlock (create_block thn))
+        ;;;     (define elsBlock (create_block els)) 
+        ;;;     (foldr explicate_effect (explicate_pred exp thnBlock elsBlock) es)]
         [(Begin es exp)
             (define thnBlock (create_block thn))
             (define elsBlock (create_block els)) 
-            (foldr explicate_effect (explicate_pred exp thnBlock elsBlock) es)]
+            (explicate_effect (Begin es (Void)) (explicate_pred exp thnBlock elsBlock))]
         [_ (error "explicate_pred unhandled case" cnd)]
     )
 )
@@ -372,6 +376,7 @@
 (define (explicate_effect e cont) 
     (match e
         [(Prim 'read '()) (Seq e cont)]
+        [(Prim 'vector-set! es) (Seq (Prim 'vector-set! es) cont)]
         [(WhileLoop cnd bdy) 
             (let ([loop (gensym 'loop)])
             (define body (explicate_pred cnd (explicate_effect bdy (Goto loop)) cont)) 
@@ -379,7 +384,11 @@
             (Goto loop))
         ]
         [(SetBang v exp) (explicate_assign exp v cont)]
-        [(Begin es exp) (explicate_effect exp (foldr explicate_effect cont es))]
+        [(Begin es body)
+            (match es
+            [(list) (explicate_effect body cont)]
+            [(cons e rest) (explicate_effect e (explicate_effect (Begin rest body) cont))])]
+        ;;; [(Begin es exp) (explicate_effect exp (explicate_effect es cont))]
         [(If cond exp1 exp2) (explicate_pred cond (explicate_effect exp1 cont) (explicate_effect exp2 cont))]
         [(Let x rhs body) (explicate_assign rhs x (explicate_effect body cont))]
         [(Allocate len T) cont]
@@ -399,7 +408,7 @@
         [(If cond exp1 exp2) (explicate_pred cond (explicate_tail exp1) (explicate_tail exp2))]
         [(Prim op es) (Return (Prim op es))]
         [(SetBang v exp) (explicate_effect e (Return (Void)))]
-        [(WhileLoop cnd bdy) (explicate_effect e (Return (Void)))]
+        [(WhileLoop cnd bdy) (explicate_effect e '())]
         [(Begin es exp) (foldr explicate_effect (explicate_tail exp) es)]
         [(Allocate len type) (Return (Allocate len type))]
         [(GlobalValue var) (Return (GlobalValue var))]
