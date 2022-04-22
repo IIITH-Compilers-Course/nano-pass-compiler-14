@@ -802,13 +802,10 @@
                     (cond 
                         [(and (not (set-member? (list->set allRegisters) v)) (ptr-bool? (dict-ref local-vars (Var-name v)))) 
                             (for ([reg allRegisters]) 
-                                (displayln "reg")
-                                (displayln reg)
-                                (displayln v)
                                 (add-edge! interference-graph reg v))
                         ]
                     )
-                    ;;; (add-edge! interference-graph v d)
+                    (add-edge! interference-graph v d)
                 ]
                 [_ (add-edge! interference-graph v d)]
             )
@@ -983,8 +980,6 @@
                    (assign-next q vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
                 ]
                 [_ 
-                    (displayln "Manish")
-                    (displayln curNode)
                     (define curColor (mex (node-name curNode) (set-to-list (node-blockedColorsSet curNode))))
                     (define updatedQ (update-neighbours q vname-pointer curColor (sequence->list (in-neighbors graph (node-name curNode))) ))
                     (assign-next updatedQ vname-pointer graph (dict-set var-colors (node-name curNode) curColor))
@@ -1119,23 +1114,23 @@
                 )
         ]
         [(Instr op (list (Deref reg1 offset_1) (Deref reg2 offset_2))) 
-            (cond
-                [(eq? offset_1 offset_2) '()]
-                [else 
+            ;;; (cond
+                ;;; [(eq? offset_1 offset_2) '()]
+                ;;; [else 
                     (list
                         (Instr 'movq (list (Deref reg1 offset_1) (Reg 'rax)))
                         (Instr op (list (Reg 'rax) (Deref reg2 offset_2)))
                     )
-                ]
-            )
+                ;;; ]
+            ;;; )
         ]
         [(Instr op (list (Reg reg1) (Reg reg2)))
-            (cond
-                [(eq? reg1 reg2) '()]
-                [else 
+            ;;; (cond
+                ;;; [(eq? reg1 reg2) '()]
+                ;;; [else 
                     (list (Instr op (list (Reg reg1) (Reg reg2))))
-                ]
-            )
+                ;;; ]
+            ;;; )
         ]
         [_ (list stm)]
     )
