@@ -35,5 +35,4 @@
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "vectors" type-check-Lvec compiler-passes "vectors_r3" (tests-for "vectors"))
-
+(compiler-tests "vectors" type-check-Lvec compiler-passes "vectors_test" (tests-for "vectors"))
