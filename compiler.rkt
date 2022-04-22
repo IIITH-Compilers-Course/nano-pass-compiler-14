@@ -622,8 +622,16 @@
     )
 )
 
+(define (check-deref e)
+    (match e
+        [(Deref r i) (Reg r)]
+        [_ e]
+    )
+)
+
+
 (define (list-to-set lst)
-    (list->set (for/list ([e lst] #:when (check-cond e)) e))  
+    (list->set (for/list ([e lst] #:when (check-cond e)) (check-deref e)))  
 )
 
 (define caller-saved-registers (set
@@ -784,10 +792,14 @@
                 [(Callq 'collect n) 
                     (cond 
                         [(and (not (set-member? (list->set allRegisters) v)) (ptr-bool? (dict-ref local-vars (Var-name v)))) 
-                            (for ([reg allRegisters]) (add-edge! interference-graph reg v))
+                            (for ([reg allRegisters]) 
+                                (displayln "reg")
+                                (displayln reg)
+                                (displayln v)
+                                (add-edge! interference-graph reg v))
                         ]
                     )
-                    (add-edge! interference-graph v d)
+                    ;;; (add-edge! interference-graph v d)
                 ]
                 [_ (add-edge! interference-graph v d)]
             )
@@ -898,8 +910,8 @@
             (define color (dict-ref varmap (Var e)))
             (cond   
                 [(< color 11) (color-to-register color)]
-                [(odd? color) (Deref 'rbp (* 8  (+ (/ (- color 9) 2) usedCalleeNum)))]
-                [else (Deref 'r15 (* 8  (/ (- color 10) 2)))]
+                [(odd? color) (Deref 'rbp (- (* 8  (+ (/ (- color 9) 2) usedCalleeNum))) )]
+                [else (Deref 'r15 (- (* 8  (/ (- color 10) 2))))]
             )
         ]
         [_ e]
