@@ -12,10 +12,12 @@
 (require "interp-Lif.rkt")
 (require "interp-Lwhile.rkt")
 (require "interp-Lvec.rkt")
+(require "interp-Lfun.rkt")
 (require "type-check-Lvar.rkt")
 (require "type-check-Lif.rkt")
 (require "type-check-Lwhile.rkt")
 (require "type-check-Lvec.rkt")
+(require "type-check-Lfun.rkt")
 (require "type-check-Cvar.rkt")
 (require "type-check-Cif.rkt")
 (require "type-check-Cwhile.rkt")
@@ -88,13 +90,17 @@
         [(Begin es exp) (Begin (for/list ([e es]) (shrink-helper e)) (shrink-helper exp))]
         [(WhileLoop exp1 exp2) (WhileLoop (shrink-helper exp1) (shrink-helper exp2))]
         [(HasType exp type) (HasType (shrink-helper exp) type)]
+        [(Apply fn es) (Apply (shrink-helper fn) (for/list ([exp es]) (shrink-helper exp)))]
         [_ e]
     )
 )
 
 (define (shrink p)
     (match p
-        [(Program info e) (Program info (shrink-helper e))]
+        [(ProgramDefsExp info dfList e) 
+            (set! dfList (append dfList (list (Def 'main '() 'Integer '() e))))
+            (ProgramDefs info (for/list ([df dfList]) (Def (Def-name df) (Def-param* df) (Def-rty df) (Def-info df) (shrink-helper (Def-body df)))))
+        ]
     )
 )
 
@@ -119,12 +125,42 @@
       [(Begin es exp) (Begin (for/list ([e es]) ((uniquify-exp env) e)) ((uniquify-exp env) exp))]
       [(WhileLoop exp1 exp2) (WhileLoop ((uniquify-exp env) exp1) ((uniquify-exp env) exp2))]
       [(HasType exp type) (HasType ((uniquify-exp env) exp) type)]
+      [(Apply fn es) (Apply ((uniquify-exp env) fn) (for/list ([exp es]) ((uniquify-exp env) exp)))]
+      [(Def name params rty info body) 
+        (define new_params
+            (for/list ([prm params]) 
+                (match prm
+                    [(cons var type) 
+                        (define newVar (gensym var))
+                        (dict-set! env var newVar)
+                        (cons newVar type)
+                    ]
+                )
+            )
+        )
+        (Def (dict-ref env name) new_params rty info ((uniquify-exp env) body))
+      ]
 )))
 
 ;; uniquify : R1 -> R1
 (define (uniquify p)
   (match p
-    [(Program info e) (Program info ((uniquify-exp '()) e))]))
+    [(ProgramDefs info dfList) 
+        (define fnNameEnv (make-hash))
+        (for/list ([df dfList])
+            (define newFnName (gensym (Def-name df)))
+            (if (eq? (Def-name df) 'main) (set! newFnName 'main) (set! newFnName newFnName))
+            (dict-set! fnNameEnv (Def-name df) newFnName)
+        )
+
+        (ProgramDefs info
+            (for/list ([df dfList]) 
+                ((uniquify-exp fnNameEnv) df)
+            )
+        )
+    ]
+  )
+)
 
 (define (has-type-vectorSet-helper varList vectorName [ind 0])
     (match varList
@@ -1211,16 +1247,16 @@
 (define compiler-passes
   `( 
     ;;;  ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
-     ("shrink", shrink, interp-Lwhile, type-check-Lvec)
-     ("uniquify", uniquify, interp-Lwhile, type-check-Lvec)
-     ("expose allocation", expose_allocation, interp-Lvec, type-check-Lvec)
-     ("uncover get!", uncover-get!, interp-Lvec, type-check-Lvec)
-     ("remove complex opera*", remove-complex-opera*, interp-Lvec, type-check-Lvec)
-     ("explicate control", explicate_control, interp-Cvec, type-check-Cvec)
-     ("instruction selection", select-instructions, interp-x86-0)
-     ("uncover live", uncover-live, interp-x86-0)
-     ("interference graph", build-interference, interp-x86-0)
-     ("allocate registers", allocate-registers, interp-x86-0)
-     ("patch instructions", patch-instructions, interp-x86-0)
-     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+     ("shrink", shrink, interp-Lfun, type-check-Lfun)
+     ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
+    ;;;  ("expose allocation", expose_allocation, interp-Lvec, type-check-Lvec)
+    ;;;  ("uncover get!", uncover-get!, interp-Lvec, type-check-Lvec)
+    ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lvec, type-check-Lvec)
+    ;;;  ("explicate control", explicate_control, interp-Cvec, type-check-Cvec)
+    ;;;  ("instruction selection", select-instructions, interp-x86-0)
+    ;;;  ("uncover live", uncover-live, interp-x86-0)
+    ;;;  ("interference graph", build-interference, interp-x86-0)
+    ;;;  ("allocate registers", allocate-registers, interp-x86-0)
+    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
+    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
      ))
