@@ -313,14 +313,19 @@
                 [(Prim 'vector es) (has-type-helper es type)]
             )
         ]
+        [(Def name params rty info body) (Def name params rty info (expose_allocation_helper body))]
+        [(Apply fn es) (Apply (expose_allocation_helper fn) (for/list ([exp es]) (expose_allocation_helper exp)))]
         [_ e]
     )
 )
 
 (define (expose_allocation p) 
     (match p 
-        [(Program info body) 
-            (Program info (expose_allocation_helper body))]
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info 
+                (for/list ([df dfList]) (expose_allocation_helper df))
+            )
+        ]
     )
 )
 
@@ -355,15 +360,18 @@
         [(SetBang v exp) (SetBang v ((uncover-get!-exp set!-vars) exp))]
         [(Begin es exp) (Begin (for/list ([e es]) ((uncover-get!-exp set!-vars) e)) ((uncover-get!-exp set!-vars) exp))]
         [(WhileLoop exp1 exp2) (WhileLoop ((uncover-get!-exp set!-vars) exp1) ((uncover-get!-exp set!-vars) exp2))]
+        [(Def name params rty info body) (Def name params rty info (uncover-get!-exp body))]
         [_ e]
     )
 )
 
 (define (uncover-get! p) 
     (match p 
-        [(Program info body) 
-            (define setVars (collect-set! body))
-            (Program info ((uncover-get!-exp setVars) body))]
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info 
+                (for/list ([df dfList]) (expose_allocation_helper df))
+            )
+        ]
     )
 )
 
@@ -1364,8 +1372,8 @@
      ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
      ("reveal functions", reveal-functions, interp-Lfun, type-check-Lfun)
      ("limit functions", limit-functions, interp-Lfun, type-check-Lfun)
-    ;;;  ("expose allocation", expose_allocation, interp-Lvec, type-check-Lvec)
-    ;;;  ("uncover get!", uncover-get!, interp-Lvec, type-check-Lvec)
+     ("expose allocation", expose_allocation, interp-Lfun, type-check-Lfun)
+     ("uncover get!", uncover-get!, interp-Lfun, type-check-Lfun)
     ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lvec, type-check-Lvec)
     ;;;  ("explicate control", explicate_control, interp-Cvec, type-check-Cvec)
     ;;;  ("instruction selection", select-instructions, interp-x86-0)
