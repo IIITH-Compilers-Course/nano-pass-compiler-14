@@ -162,6 +162,119 @@
   )
 )
 
+(define (reveal-functions-helper e)
+    (match e
+        [(Let x e1 body) (Let (reveal-functions-helper x) (reveal-functions-helper e1) (reveal-functions-helper body))]
+        [(If cond e1 e2) (If (reveal-functions-helper cond) (reveal-functions-helper e1) (reveal-functions-helper e2))]
+        [(Prim op es) (Prim op (for/list ([e1 es]) (reveal-functions-helper e1)))]
+        [(SetBang v exp) (SetBang v (reveal-functions-helper exp))]
+        [(Begin es exp) (Begin (for/list ([e es]) (reveal-functions-helper e)) (reveal-functions-helper exp))]
+        [(WhileLoop exp1 exp2) (WhileLoop (reveal-functions-helper exp1) (reveal-functions-helper exp2))]
+        [(HasType exp type) (HasType (reveal-functions-helper exp) type)]
+        [(Apply fn es) (Apply 
+            (if (Var? fn) (FunRef (Var-name fn) (length es)) (reveal-functions-helper fn)) 
+            (for/list ([exp es]) (reveal-functions-helper exp)))
+        ]
+        [_ e]
+    )
+)
+
+(define (reveal-functions p)
+    (match p
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info
+                (for/list ([df dfList])
+                    (Def (Def-name df) (Def-param* df) (Def-rty df) (Def-info df) (reveal-functions-helper (Def-body df)))
+                )
+            )
+        ]
+    )
+)
+
+(define (limit-functions-map params vecName [paramMap '()] [ind 0])
+    (match params
+        ['() paramMap]
+        [(cons a c) (match a
+                [(cons var type)
+                    (if (< ind 5) 
+                        (limit-functions-map c vecName (dict-set paramMap var (Var var)) (+ ind 1)) 
+                        (limit-functions-map c vecName (dict-set paramMap var `(Prim 'vector-ref (list ,vecName ,(- ind 5)))) (+ ind 1))
+                    )
+                ]
+        )]
+    )
+)
+
+(define (limit-functions-params params vecName [ind 0])
+    (match params
+        ['() '()]
+        [(cons a c) 
+            (cond
+                [(< ind 5) (cons a (limit-functions-params c vecName (+ ind 1)))]
+                [else
+                    (define vc '(Vector))
+                    (for/list ([prm params])
+                        (match prm
+                            [`(,x : ,t) (set! vc (append vc (list t)))]
+                        )
+                    )
+                    (list `(,vecName : ,vc))
+                ]
+            )
+        ]
+    )
+)
+
+(define (limit-functions-fnCall params paramMap [ind 0])
+    (match params
+        ['() '()]
+        [(cons a c) 
+            (cond
+                [(< ind 5) (cons a (limit-functions-fnCall c paramMap (+ ind 1)))]
+                [else (list (Prim 'vector params))]
+            )
+        ]
+    )
+)
+
+(define (limit-functions-body body paramMap)
+    (match body
+        [(Var x) (dict-ref paramMap x)]
+        [(Let x e1 body) (Let (limit-functions-body x) (limit-functions-body e1) (limit-functions-body body))]
+        [(If cond e1 e2) (If (limit-functions-body cond) (limit-functions-body e1) (limit-functions-body e2))]
+        [(Prim op es) (Prim op (for/list ([e1 es]) (limit-functions-body e1)))]
+        [(SetBang v exp) (SetBang v (limit-functions-body exp))]
+        [(Begin es exp) (Begin (for/list ([body es]) (limit-functions-body body)) (limit-functions-body exp))]
+        [(WhileLoop exp1 exp2) (WhileLoop (limit-functions-body exp1) (limit-functions-body exp2))]
+        [(HasType exp type) (HasType (limit-functions-body exp) type)]
+        [(Apply fn es) (Apply (limit-functions-body fn paramMap) 
+                              (limit-functions-fnCall es paramMap)
+                        )
+        ]
+        [(FunRef id n) (FunRef id n)]
+        ;;; [_ body]
+    )
+)
+
+(define (limit-functions-helper df)
+    (define params (Def-param* df))
+    (define vecName (gensym 'tup))
+    (define paramMap (limit-functions-map params vecName))
+    (define newParams (limit-functions-params params vecName))
+    (define newBody (limit-functions-body (Def-body df) paramMap))
+    (Def (Def-name df) newParams (Def-rty df) (Def-info df) newBody)
+)
+
+(define (limit-functions p)
+    (match p 
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info 
+                (for/list ([df dfList]) (limit-functions-helper df))
+            )
+        ]
+    )
+)
+
 (define (has-type-vectorSet-helper varList vectorName [ind 0])
     (match varList
         ['() (Var vectorName)]
@@ -1249,6 +1362,8 @@
     ;;;  ("pe lint", pe-Lint, interp-Lvar, type-check-Lvar)
      ("shrink", shrink, interp-Lfun, type-check-Lfun)
      ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
+     ("reveal functions", reveal-functions, interp-Lfun, type-check-Lfun)
+     ("limit functions", limit-functions, interp-Lfun, type-check-Lfun)
     ;;;  ("expose allocation", expose_allocation, interp-Lvec, type-check-Lvec)
     ;;;  ("uncover get!", uncover-get!, interp-Lvec, type-check-Lvec)
     ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lvec, type-check-Lvec)
