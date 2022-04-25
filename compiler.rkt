@@ -9,6 +9,7 @@
 (require "interp-Cif.rkt")
 (require "interp-Cwhile.rkt")
 (require "interp-Cvec.rkt")
+(require "interp-Cfun.rkt")
 (require "interp-Lif.rkt")
 (require "interp-Lwhile.rkt")
 (require "interp-Lvec.rkt")
@@ -22,6 +23,7 @@
 (require "type-check-Cif.rkt")
 (require "type-check-Cwhile.rkt")
 (require "type-check-Cvec.rkt")
+(require "type-check-Cfun.rkt")
 (require "utilities.rkt")
 (require "multigraph.rkt")
 (require "graph-printing.rkt")
@@ -385,6 +387,17 @@
     )
 )
 
+(define (rco_atm_applyHelper args fnName [newArgs '()])
+    (match args
+        ['() (Apply fnName newArgs)]
+        [(cons a c) (define tmp (gensym))
+                (if (rco_atm a) (rco_atm_applyHelper c fnName (append newArgs (list a))) 
+                    ((Let tmp a (rco_atm_applyHelper c fnName (append newArgs tmp))))
+                )
+        ]
+    )
+)
+
 (define (rco_exp e)
     (match e
         [(Var n) (Var n)]
@@ -461,6 +474,13 @@
         [(SetBang v exp) (SetBang v (rco_exp exp))]
         [(Begin es exp) (Begin (for/list ([e es]) (rco_exp e)) (rco_exp exp))]
         [(WhileLoop exp1 exp2) (WhileLoop (rco_exp exp1) (rco_exp exp2))]
+        [(FunRef id n) (FunRef id n)]
+        [(Apply fn es) (define fnName (gensym))
+            (if (rco_atm fn) (rco_atm_applyHelper es fn) 
+                (Let fnName fn (rco_exp (Apply (Var fnName) es)))
+            )
+        ]
+        [(Def name params rty info body) (Def name params rty info (rco_exp body))]
         [_ e]
     )
 )
@@ -468,8 +488,13 @@
 ;; remove-complex-opera* : R1 -> R1
 (define (remove-complex-opera* p)
   (match p
-    [(Program info e) 
-        (Program info (rco_exp e))]))
+    [(ProgramDefs info dfList) 
+        (ProgramDefs info 
+            (for/list ([df dfList]) (rco_exp df))
+        )
+    ]
+  )
+)
 
 (define basic-blocks '())
 
@@ -526,6 +551,13 @@
             (define thnBlock (create_block thn))
             (define elsBlock (create_block els)) 
             (explicate_effect (Begin es (Void)) (explicate_pred exp thnBlock elsBlock))]
+        [(Apply fn es) 
+            (define vr (gensym))
+            (explicate_assign cnd vr (IfStmt (Prim 'eq? (list (Var vr) (Bool #t))) 
+                                           (create_block thn) (create_block els)
+                                    )
+            )
+        ]
         [_ (error "explicate_pred unhandled case" cnd)]
     )
 )
@@ -569,6 +601,8 @@
         [(Begin es exp) (foldr explicate_effect (explicate_tail exp) es)]
         [(Allocate len type) (Return (Allocate len type))]
         [(GlobalValue var) (Return (GlobalValue var))]
+        [(FunRef id n) (Return e)]
+        [(Apply fn es) (TailCall fn es)]
         [else (error "explicate_tail unhandled case" e)]))
 
 (define (explicate_assign e x cont)
@@ -587,17 +621,26 @@
         [(Allocate len type) (Seq (Assign (Var x) e) cont)]
         [(GlobalValue var) (Seq (Assign (Var x) e) cont)]
         [(Collect bytes) (Seq (Collect bytes) cont)]
+        [(FunRef id n) (Seq (Assign (Var x) e) cont)]
+        [(Apply fn es) (Seq (Assign (Var x) (Call fn es)) cont)]
         [else (error "explicate_assign unhandled case" e)]))
+
+(define (explicate_control_def df)
+    (set! basic-blocks '())
+    (define instrBlocks (make-hash))
+    (define body (Def-body df))
+    (dict-set! instrBlocks (symbol-append (Def-name df) 'start) (explicate_tail body))
+    (for ([e basic-blocks]) (dict-set! instrBlocks (car e) (cdr e)))
+    (Def (Def-name df) (Def-param* df) (Def-rty df) (Def-info df) instrBlocks)
+)
 
 ;; explicate-control : R1 -> C0
 (define (explicate_control p)
     (match p
-        [(Program info body) 
-            (set! basic-blocks '())
-            (define instrBlocks (make-hash))
-            (dict-set! instrBlocks 'start (explicate_tail body))
-            (for ([e basic-blocks]) (dict-set! instrBlocks (car e) (cdr e)))
-            (CProgram info instrBlocks)
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info 
+                (for/list ([df dfList]) (explicate_control_def df))
+            )
         ]    
     )
 )
@@ -653,6 +696,10 @@
                 (select-instructions-statement t*)
             )
         ]
+        [(TailCall fnName es) (append
+            (select-instructions-movArgReg es)
+            (list (TailJmp fnName (length es)))
+        )]
     )
 )
 
@@ -766,17 +813,53 @@
                   (Instr 'movq (list (Reg 'r11) x))
             )
         ]
+        [(FunRef id n) (list (Instr 'leaq (list (Global id) x)))]
+        [(Call fnName es) (append
+            (select-instructions-movArgReg es)
+            (list (IndirectCallq fnName (length es)))
+            (list (Instr 'movq (list (Reg 'rax) x)))
+        )]
     )
+)
+
+(define (select-instructions-movArgReg es)
+    (for/list ([arg es] [reg (set-to-list argument-registers)]) (Instr 'movq (list (select-instructions-atomic arg) reg)))
+)
+
+(define (select-instructions-movRegArg es)
+    (for/list ([arg es] [reg (set-to-list argument-registers)]) (Instr 'movq (list reg (Var (car arg))) ))
+)
+
+(define (select-instructions-def df)
+    (define instrBlocks (make-hash))
+    (define body (Def-body df))
+    (define prms (Def-param* df))
+    (dict-for-each body (lambda (lbl instrs) (dict-set! instrBlocks lbl (Block '() (select-instructions-statement instrs)))))
+
+    (define movRegArg (select-instructions-movRegArg prms))
+    (define startLbl (symbol-append (Def-name df) 'start))
+    (define startInstrs (Block-instr* (dict-ref instrBlocks startLbl)))
+    (set! startInstrs (append movRegArg startInstrs))
+    (dict-set! instrBlocks startLbl (Block '() startInstrs))
+    
+    (define info (Def-info df))
+    (set! info (dict-set info 'num-params (length prms)))
+
+    ;;; TODO
+    ;;; (define lclVars (dict-ref info 'locals-types))
+    ;;; (set! info (dict-set info 'locals-types (append lclVars prms)))
+
+    (Def (Def-name df) prms (Def-rty df) info instrBlocks)
 )
 
 ;; select-instructions : C0 -> pseudo-x86
 (define (select-instructions p)
   (match p
-    [(CProgram info e) 
-        (define instrBlocks (make-hash))
-        (dict-for-each e (lambda (lbl instrs) (dict-set! instrBlocks lbl (Block '() (select-instructions-statement instrs)))))
-        (X86Program info instrBlocks)
-    ]
+    [(ProgramDefs info dfList) 
+        (ProgramDefs info 
+            (for/list ([df dfList]) (select-instructions-def df))
+        )
+    ] 
   )
 )
 
@@ -784,6 +867,7 @@
     (match e
         [(Imm e) #f]
         [(Global g) #f]
+        [(FunRef id n) #f]
         [_ #t]
     )
 )
@@ -794,7 +878,6 @@
         [_ e]
     )
 )
-
 
 (define (list-to-set lst)
     (list->set (for/list ([e lst] #:when (check-cond e)) (check-deref e)))  
@@ -835,8 +918,19 @@
         [(Instr 'addq es) (list-to-set es)]
         [(Instr 'subq es) (list-to-set es)]
         [(Instr 'negq es) (list-to-set es)]
+        [(Instr 'leaq es) (list-to-set (list (car es)))]
         [(Jmp _) (set (Reg 'rax) (Reg 'rsp))]
-        [(Callq _ _) argument-registers]
+        [(Callq fnName n)
+            (if (<= n 6) (list->set (take argument-registers n))
+                        (list->set (take argument-registers 6))
+            )
+        ]
+        [(IndirectCallq fnName n)
+            (set-union (set fnName) (list->set (take (set-to-list argument-registers) n)))
+        ]
+        [(TailJmp fnName n)
+            (set-union (set fnName) (list->set (take (set-to-list argument-registers) n)))
+        ]
         [_ (set)]
     )
 )
@@ -848,7 +942,10 @@
         [(Instr 'addq es) (list->set (cdr es))]
         [(Instr 'subq es) (list->set (cdr es))]
         [(Instr 'negq es) (list->set es)]
+        [(Instr 'leaq es) (list->set es)]
         [(Callq _ _) caller-saved-registers]
+        [(IndirectCallq fnName n) caller-saved-registers]
+        [(TailJmp fnName n) caller-saved-registers]
         [_ (set)]
     )
 )
@@ -892,6 +989,7 @@
     (define live-after-list (get-live-after instrs initialSet))
     (dict-set! live-after-sets label live-after-list)
     (car live-after-list)
+
 )
 
 (define (analyze_dataflow G transfer bottom join e)
@@ -920,28 +1018,42 @@
     mapping
 )
 
+(define (uncover-live-def df)
+    (define body (Def-body df)) 
+    (set! label-live (make-hash))
+    (set! live-after-sets (make-hash))
+    (define cfgEdges '())
+
+    (dict-for-each body 
+        (lambda (lbl instrs) (set! cfgEdges (append cfgEdges (makeCFG lbl (Block-instr* instrs)))))
+    )
+
+    (define graph (make-multigraph cfgEdges))
+    (dict-for-each body 
+        (lambda (lbl instrs) (add-vertex! graph lbl))
+    )
+
+    (define graphTransp (transpose graph))
+    (define topoOrder (tsort graphTransp))
+    (dict-set! label-live 'conclusion (set (Reg 'rax) (Reg 'rsp)))
+    (analyze_dataflow graphTransp uncover-live-block (set) set-union body)
+
+    (dict-for-each body 
+        (lambda (lbl block) 
+            (dict-set! body lbl (Block (dict-set (Block-info block) 'live-after (dict-ref live-after-sets lbl)) (Block-instr* block)))
+        )
+    )
+
+    (Def (Def-name df) (Def-param* df) (Def-rty df) (Def-info df) body)
+)
+
 (define (uncover-live p)
     (match p
-        [(X86Program info e) 
-            (set! label-live (make-hash))
-            (set! live-after-sets (make-hash))
-            (define cfgEdges '())
-            (dict-for-each e 
-                (lambda (lbl instrs) (set! cfgEdges (append cfgEdges (makeCFG lbl (Block-instr* instrs)))))
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info 
+                (for/list ([df dfList]) (uncover-live-def df))
             )
-
-            (define graph (make-multigraph cfgEdges))
-            (define graphTransp (transpose graph))
-            (define topoOrder (tsort graphTransp))
-            (dict-set! label-live 'conclusion (set (Reg 'rax) (Reg 'rsp)))
-            (analyze_dataflow graphTransp uncover-live-block (set) set-union e)
-            (dict-for-each e 
-                (lambda (lbl block) 
-                    (dict-set! e lbl (Block (dict-set (Block-info block) 'live-after (dict-ref live-after-sets lbl)) (Block-instr* block)))
-                )
-            )
-            (X86Program info e)
-        ]
+        ] 
     )
 )
 
@@ -955,7 +1067,16 @@
             (match curInstr
                 [(Instr 'movq (list src dest)) (when (not (eq? src v)) (add-edge! interference-graph v d))]
                 [(Instr 'movzbq (list src dest)) (when (not (eq? src v)) (add-edge! interference-graph v d))]
-                [(Callq 'collect n) 
+                [(Callq fnName n) 
+                    (cond 
+                        [(and (not (set-member? (list->set allRegisters) v)) (ptr-bool? (dict-ref local-vars (Var-name v)))) 
+                            (for ([reg allRegisters]) 
+                                (add-edge! interference-graph reg v))
+                        ]
+                    )
+                    (add-edge! interference-graph v d)
+                ]
+                [(IndirectCallq fnName n) 
                     (cond 
                         [(and (not (set-member? (list->set allRegisters) v)) (ptr-bool? (dict-ref local-vars (Var-name v)))) 
                             (for ([reg allRegisters]) 
@@ -991,9 +1112,9 @@
 
 (define local-vars (make-hash))
 
-(define (build-interference p)
-    (match p
-        [(X86Program info body)
+(define (build-interference-def df)
+    (match df
+        [(Def nm prm rty info body)
             (set! local-vars (dict-ref info 'locals-types))
             (define graph (undirected-graph '()))
             (dict-for-each body
@@ -1003,7 +1124,18 @@
                     )
                 )
             )
-        (X86Program (dict-set info 'conflicts graph) body)]
+            (Def nm prm rty (dict-set info 'conflicts graph) body)
+        ]
+    )
+)
+
+(define (build-interference p)
+    (match p
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info 
+                (for/list ([df dfList]) (build-interference-def df))
+            )
+        ] 
     )
 )
 
@@ -1234,9 +1366,9 @@
     )
 )
 
-(define (allocate-registers p)
-    (match p
-        [(X86Program info body)
+(define (allocate-registers-def df)
+    (match df
+        [(Def nm prm rty info body)
             (define graph (dict-ref info 'conflicts))
             (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
             (define numSpilledVariables (num-spilled-var varColors))
@@ -1251,8 +1383,18 @@
                 )
             )
 
-            (X86Program (dict-set (dict-set (dict-set info 'stack-space numSpilledVariables) 'num-root-spills numRootSpilledVariables) 'used_callee usedCallee) body)
+            (Def nm prm rty (dict-set (dict-set (dict-set info 'stack-space numSpilledVariables) 'num-root-spills numRootSpilledVariables) 'used_callee usedCallee) body)
         ]
+    )
+)
+
+(define (allocate-registers p)
+    (match p
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info 
+                (for/list ([df dfList]) (allocate-registers-def df))
+            )
+        ] 
     )
 )
 
@@ -1269,6 +1411,18 @@
                     (Instr 'movq (list (Imm n) (Reg 'rax)))
                     (Instr 'cmpq (list src (Reg 'rax)))
                 )
+        ]
+        [(Instr 'leaq (list src (Deref reg1 offset))) 
+                (list
+                    (Instr 'leaq (list src (Reg 'rax)))
+                    (Instr 'movq (list (Reg 'rax) (Deref reg1 offset)))
+                )
+        ]
+        [(TailJmp fnName n)
+            (list
+                (Instr 'movq (list fnName (Reg 'rax)))
+                (TailJmp (Reg 'rax) n)
+            )
         ]
         [(Instr op (list (Deref reg1 offset_1) (Deref reg2 offset_2))) 
             ;;; (cond
@@ -1293,10 +1447,9 @@
     )
 )
 
-;; patch-instructions : psuedo-x86 -> x86
-(define (patch-instructions p)
-    (match p
-        [(X86Program info body)
+(define (patch-instructions-def df)
+    (match df
+        [(Def nm prm rty info body)
             (dict-for-each body
                 (lambda (lbl instrs)
                     (match (dict-ref body lbl)
@@ -1304,7 +1457,19 @@
                     )
                 )
             )
-        (X86Program info body)]
+            (Def nm prm rty info body)
+        ]
+    )
+)
+
+;; patch-instructions : psuedo-x86 -> x86
+(define (patch-instructions p)
+    (match p
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info 
+                (for/list ([df dfList]) (patch-instructions-def df))
+            )
+        ] 
     )
 )
 
@@ -1323,42 +1488,82 @@
     )
 )
 
+(define (tailJmpConvert instr A R info fnName)
+    (match instr
+        [(TailJmp fnName n) 
+            (append (list (Instr 'subq (list (Imm R) (Reg 'r15))))
+                    (list (Instr 'addq (list (Imm A) (Reg 'rsp))))
+                    (pop-calle-saved (dict-ref info 'used_callee))
+                    (list (Instr 'popq (list (Reg 'rbp))))
+                    (list (IndirectJmp fnName))
+            )
+        ]
+        [_ (list instr)]
+    )
+)
+
+(define (prelude-and-conclusion-def df)
+    (match df [(Def nm prm rty info body)
+        (define S (dict-ref info 'stack-space))
+        (define C (length (set-to-list (dict-ref info 'used_callee))))
+        (define A (- (align (+ (* 8 S) (* 8 C)) 16) (* 8 C)))
+        (define R (* 8 (dict-ref info 'num-root-spills)))
+
+        (dict-for-each body
+            (lambda (lbl instrs)
+                (match (dict-ref body lbl)
+                    [(Block sinfo instrs) 
+                        (define lstlstInstr (for/list ([instr instrs]) (tailJmpConvert instr A R info nm)))
+                        (dict-set! body lbl (Block sinfo (foldr append '() lstlstInstr)))
+                    ] 
+                )
+            )
+        )
+
+        (dict-set! body nm 
+            (Block info (append (list (Instr 'pushq (list (Reg 'rbp)))) 
+                                                (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))) 
+                                                (push-calle-saved (dict-ref info 'used_callee)) 
+                                                (list (Instr 'subq (list (Imm A) (Reg 'rsp))))
+                                                
+                                                (if (eq? nm 'main)
+                                                    (append 
+                                                        (list (Instr 'movq (list (Imm 16384) (Reg 'rdi))))
+                                                        (list (Instr 'movq (list (Imm 16384) (Reg 'rsi))))
+                                                        (list (Callq 'initialize 2))
+                                                        (list (Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15))))
+                                                    )
+                                                    '()
+                                                )
+
+                                                (zeroOutRootStack (dict-ref info 'num-root-spills))
+                                                (list (Instr 'addq (list (Imm R) (Reg 'r15))))
+                                                (list (Jmp (symbol-append nm 'start)))
+                        )
+            )
+        )
+        (dict-set! body (symbol-append nm 'conclusion)
+                        (Block info (append  (list  (Instr 'subq (list (Imm R) (Reg 'r15))))
+                                                    (list (Instr 'addq (list (Imm A) (Reg 'rsp))))
+                                                    (pop-calle-saved (dict-ref info 'used_callee))
+                                                    (list (Instr 'popq (list (Reg 'rbp))))
+                                                    (list (Retq))
+                                            )
+                                )
+        )
+
+        (Def nm prm rty info body)]
+    )
+)
+
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
     (match p
-        [(X86Program info es) 
-            (define S (dict-ref info 'stack-space))
-            (define C (length (set-to-list (dict-ref info 'used_callee))))
-            (define A (- (align (+ (* 8 S) (* 8 C)) 16) (* 8 C)))
-            (define R (* 8 (dict-ref info 'num-root-spills)))
-            (dict-set! es 'main 
-                (Block info (append (list (Instr 'pushq (list (Reg 'rbp)))) 
-                                                    (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))) 
-                                                    (push-calle-saved (dict-ref info 'used_callee)) 
-                                                    (list (Instr 'subq (list (Imm A) (Reg 'rsp))))
-                                                    
-                                                    (list (Instr 'movq (list (Imm 16384) (Reg 'rdi))))
-                                                    (list (Instr 'movq (list (Imm 16384) (Reg 'rsi))))
-                                                    (list (Callq 'initialize 2))
-                                                    (list (Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15))))
-
-                                                    (zeroOutRootStack (dict-ref info 'num-root-spills))
-                                                    (list (Instr 'addq (list (Imm R) (Reg 'r15))))
-                                                    (list (Jmp 'start))
-                            )
-                )
+        [(ProgramDefs info dfList) 
+            (ProgramDefs info 
+                (for/list ([df dfList]) (prelude-and-conclusion-def df))
             )
-            (dict-set! es 'conclusion 
-                            (Block info (append  (list  (Instr 'subq (list (Imm R) (Reg 'r15))))
-                                                        (list (Instr 'addq (list (Imm A) (Reg 'rsp))))
-                                                        (pop-calle-saved (dict-ref info 'used_callee))
-                                                        (list (Instr 'popq (list (Reg 'rbp))))
-                                                        (list (Retq))
-                                                )
-                                    )
-            )
-
-        (X86Program info es)]
+        ] 
     )  
 )
 
@@ -1374,12 +1579,12 @@
      ("limit functions", limit-functions, interp-Lfun, type-check-Lfun)
      ("expose allocation", expose_allocation, interp-Lfun, type-check-Lfun)
      ("uncover get!", uncover-get!, interp-Lfun, type-check-Lfun)
-    ;;;  ("remove complex opera*", remove-complex-opera*, interp-Lvec, type-check-Lvec)
-    ;;;  ("explicate control", explicate_control, interp-Cvec, type-check-Cvec)
-    ;;;  ("instruction selection", select-instructions, interp-x86-0)
-    ;;;  ("uncover live", uncover-live, interp-x86-0)
-    ;;;  ("interference graph", build-interference, interp-x86-0)
-    ;;;  ("allocate registers", allocate-registers, interp-x86-0)
-    ;;;  ("patch instructions", patch-instructions, interp-x86-0)
-    ;;;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+     ("remove complex opera*", remove-complex-opera*, interp-Lfun, type-check-Lfun)
+     ("explicate control", explicate_control, interp-Cfun, type-check-Cfun)
+     ("instruction selection", select-instructions, interp-x86-3)
+     ("uncover live", uncover-live, interp-x86-3)
+     ("interference graph", build-interference, interp-x86-3)
+     ("allocate registers", allocate-registers, interp-x86-3)
+     ("patch instructions", patch-instructions, interp-x86-3)
+     ("prelude-and-conclusion", prelude-and-conclusion, interp-x86-3)
      ))
