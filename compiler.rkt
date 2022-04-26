@@ -242,19 +242,19 @@
 (define (limit-functions-body body paramMap)
     (match body
         [(Var x) (dict-ref paramMap x)]
-        [(Let x e1 body) (Let (limit-functions-body x) (limit-functions-body e1) (limit-functions-body body))]
-        [(If cond e1 e2) (If (limit-functions-body cond) (limit-functions-body e1) (limit-functions-body e2))]
-        [(Prim op es) (Prim op (for/list ([e1 es]) (limit-functions-body e1)))]
-        [(SetBang v exp) (SetBang v (limit-functions-body exp))]
-        [(Begin es exp) (Begin (for/list ([body es]) (limit-functions-body body)) (limit-functions-body exp))]
-        [(WhileLoop exp1 exp2) (WhileLoop (limit-functions-body exp1) (limit-functions-body exp2))]
-        [(HasType exp type) (HasType (limit-functions-body exp) type)]
+        [(Let x e1 body) (Let (limit-functions-body x paramMap) (limit-functions-body e1 paramMap) (limit-functions-body body paramMap))]
+        [(If cond e1 e2) (If (limit-functions-body cond paramMap) (limit-functions-body e1 paramMap) (limit-functions-body e2 paramMap))]
+        [(Prim op es) (Prim op (for/list ([e1 es]) (limit-functions-body e1 paramMap)))]
+        [(SetBang v exp) (SetBang v (limit-functions-body exp paramMap))]
+        [(Begin es exp) (Begin (for/list ([body es]) (limit-functions-body body paramMap)) (limit-functions-body exp paramMap))]
+        [(WhileLoop exp1 exp2) (WhileLoop (limit-functions-body exp1 paramMap) (limit-functions-body exp2) paramMap)]
+        [(HasType exp type) (HasType (limit-functions-body exp paramMap) type)]
         [(Apply fn es) (Apply (limit-functions-body fn paramMap) 
                               (limit-functions-fnCall es paramMap)
                         )
         ]
         [(FunRef id n) (FunRef id n)]
-        ;;; [_ body]
+        [_ body]
     )
 )
 
@@ -390,9 +390,9 @@
 (define (rco_atm_applyHelper args fnName [newArgs '()])
     (match args
         ['() (Apply fnName newArgs)]
-        [(cons a c) (define tmp (gensym))
+        [(cons a c) (define tmp (gensym 'as))
                 (if (rco_atm a) (rco_atm_applyHelper c fnName (append newArgs (list a))) 
-                    ((Let tmp a (rco_atm_applyHelper c fnName (append newArgs tmp))))
+                    (Let tmp a (rco_atm_applyHelper c fnName (append newArgs (list (Var tmp)))))
                 )
         ]
     )
@@ -475,7 +475,7 @@
         [(Begin es exp) (Begin (for/list ([e es]) (rco_exp e)) (rco_exp exp))]
         [(WhileLoop exp1 exp2) (WhileLoop (rco_exp exp1) (rco_exp exp2))]
         [(FunRef id n) (FunRef id n)]
-        [(Apply fn es) (define fnName (gensym))
+        [(Apply fn es) (define fnName (gensym 'fName))
             (if (rco_atm fn) (rco_atm_applyHelper es fn) 
                 (Let fnName fn (rco_exp (Apply (Var fnName) es)))
             )
@@ -553,9 +553,9 @@
             (explicate_effect (Begin es (Void)) (explicate_pred exp thnBlock elsBlock))]
         [(Apply fn es) 
             (define vr (gensym))
-            (explicate_assign cnd vr (IfStmt (Prim 'eq? (list (Var vr) (Bool #t))) 
+            (Seq (Assign (Call fn es) vr) (IfStmt (Prim 'eq? (list (Var vr) (Bool #t))) 
                                            (create_block thn) (create_block els)
-                                    )
+                                     )
             )
         ]
         [_ (error "explicate_pred unhandled case" cnd)]
@@ -1598,10 +1598,10 @@
      ("uncover get!", uncover-get!, interp-Lfun, type-check-Lfun)
      ("remove complex opera*", remove-complex-opera*, interp-Lfun, type-check-Lfun)
      ("explicate control", explicate_control, interp-Cfun, type-check-Cfun)
-     ("instruction selection", select-instructions, interp-x86-3)
-     ("uncover live", uncover-live, interp-x86-3)
-     ("interference graph", build-interference, interp-x86-3)
-     ("allocate registers", allocate-registers, interp-x86-3)
-     ("patch instructions", patch-instructions, interp-x86-3)
-     ("prelude-and-conclusion", prelude-and-conclusion, interp-x86-3)
+    ;;;  ("instruction selection", select-instructions, interp-x86-3)
+    ;;;  ("uncover live", uncover-live, interp-x86-3)
+    ;;;  ("interference graph", build-interference, interp-x86-3)
+    ;;;  ("allocate registers", allocate-registers, interp-x86-3)
+    ;;;  ("patch instructions", patch-instructions, interp-x86-3)
+    ;;;  ("prelude-and-conclusion", prelude-and-conclusion, interp-x86-3)
      ))
