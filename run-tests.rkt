@@ -32,12 +32,10 @@
           (string=? r (car (string-split p "_"))))
         all-tests)))
 
-(debug-level 1)
+;;; (debug-level 1)
 ;;; (interp-tests "functions" type-check-Lfun compiler-passes interp-Lfun "functions_test" (tests-for "functions"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
 
-;;; (interp-tests "functions" type-check-Lfun compiler-passes interp-Lfun "functions_r4" (tests-for "functions"))
-
-(compiler-tests "functions" type-check-Lfun compiler-passes "functions_r4" (tests-for "functions"))
+(compiler-tests "functions" type-check-Lfun compiler-passes "functions_test" (tests-for "functions"))
