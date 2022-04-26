@@ -134,7 +134,7 @@
                 (match prm
                     [(cons var type) 
                         (define newVar (gensym var))
-                        (dict-set! env var newVar)
+                        (set! env (dict-set env var newVar))
                         (cons newVar type)
                     ]
                 )
@@ -148,11 +148,11 @@
 (define (uniquify p)
   (match p
     [(ProgramDefs info dfList) 
-        (define fnNameEnv (make-hash))
+        (define fnNameEnv '())
         (for/list ([df dfList])
             (define newFnName (gensym (Def-name df)))
             (if (eq? (Def-name df) 'main) (set! newFnName 'main) (set! newFnName newFnName))
-            (dict-set! fnNameEnv (Def-name df) newFnName)
+            (set! fnNameEnv (dict-set fnNameEnv (Def-name df) newFnName))
         )
 
         (ProgramDefs info
@@ -164,18 +164,18 @@
   )
 )
 
-(define (reveal-functions-helper e)
+(define (reveal-functions-helper e fnNames)
     (match e
-        [(Let x e1 body) (Let (reveal-functions-helper x) (reveal-functions-helper e1) (reveal-functions-helper body))]
-        [(If cond e1 e2) (If (reveal-functions-helper cond) (reveal-functions-helper e1) (reveal-functions-helper e2))]
-        [(Prim op es) (Prim op (for/list ([e1 es]) (reveal-functions-helper e1)))]
-        [(SetBang v exp) (SetBang v (reveal-functions-helper exp))]
-        [(Begin es exp) (Begin (for/list ([e es]) (reveal-functions-helper e)) (reveal-functions-helper exp))]
-        [(WhileLoop exp1 exp2) (WhileLoop (reveal-functions-helper exp1) (reveal-functions-helper exp2))]
-        [(HasType exp type) (HasType (reveal-functions-helper exp) type)]
-        [(Apply fn es) (Apply 
-            (if (Var? fn) (FunRef (Var-name fn) (length es)) (reveal-functions-helper fn)) 
-            (for/list ([exp es]) (reveal-functions-helper exp)))
+        [(Var v) (if (eq? (dict-ref fnNames v #f) #f) (Var v) (FunRef v (dict-ref fnNames v)))]
+        [(Let x e1 body) (Let (reveal-functions-helper x fnNames) (reveal-functions-helper e1 fnNames) (reveal-functions-helper body fnNames))]
+        [(If cond e1 e2) (If (reveal-functions-helper cond fnNames) (reveal-functions-helper e1 fnNames) (reveal-functions-helper e2 fnNames))]
+        [(Prim op es) (Prim op (for/list ([e1 es]) (reveal-functions-helper e1 fnNames)))]
+        [(SetBang v exp) (SetBang v (reveal-functions-helper exp fnNames))]
+        [(Begin es exp) (Begin (for/list ([e es]) (reveal-functions-helper e fnNames)) (reveal-functions-helper exp fnNames))]
+        [(WhileLoop exp1 exp2) (WhileLoop (reveal-functions-helper exp1 fnNames) (reveal-functions-helper exp2 fnNames))]
+        [(HasType exp type) (HasType (reveal-functions-helper exp fnNames) type)]
+        [(Apply fn es) (Apply (reveal-functions-helper fn fnNames)
+            (for/list ([exp es]) (reveal-functions-helper exp fnNames)))
         ]
         [_ e]
     )
@@ -184,9 +184,13 @@
 (define (reveal-functions p)
     (match p
         [(ProgramDefs info dfList) 
+            (define fnNames (make-hash))
+            (for/list ([df dfList])
+                (dict-set! fnNames (Def-name df) (length (Def-param* df)))
+            )
             (ProgramDefs info
                 (for/list ([df dfList])
-                    (Def (Def-name df) (Def-param* df) (Def-rty df) (Def-info df) (reveal-functions-helper (Def-body df)))
+                    (Def (Def-name df) (Def-param* df) (Def-rty df) (Def-info df) (reveal-functions-helper (Def-body df) fnNames))
                 )
             )
         ]
@@ -200,7 +204,7 @@
                 [(cons var type)
                     (if (< ind 5) 
                         (limit-functions-map c vecName (dict-set paramMap var (Var var)) (+ ind 1)) 
-                        (limit-functions-map c vecName (dict-set paramMap var `(Prim 'vector-ref (list ,vecName ,(- ind 5)))) (+ ind 1))
+                        (limit-functions-map c vecName (dict-set paramMap var (Int (- ind 5)) ) (+ ind 1))
                     )
                 ]
         )]
@@ -227,30 +231,42 @@
     )
 )
 
-(define (limit-functions-fnCall params paramMap [ind 0])
+(define (limit-functions-prepVec params paramMap vecName [ind 0])
+    (match params
+        ['() '()]
+        [(cons a c) (append (list (if (not (dict-ref paramMap (Var-name a) #f)) a (Prim 'vector-ref (list (Var vecName) (dict-ref paramMap (Var-name a)))))) 
+                            (limit-functions-prepVec c paramMap vecName (+ ind 1)))
+        ]
+    )
+)
+
+(define (limit-functions-fnCall params paramMap vecName [ind 0])
     (match params
         ['() '()]
         [(cons a c) 
             (cond
-                [(< ind 5) (cons a (limit-functions-fnCall c paramMap (+ ind 1)))]
-                [else (list (Prim 'vector params))]
+                [(< ind 5) (cons a (limit-functions-fnCall c paramMap vecName (+ ind 1)))]
+                [else (list (Prim 'vector (limit-functions-prepVec params paramMap vecName)))]
             )
         ]
     )
 )
 
-(define (limit-functions-body body paramMap)
+(define (limit-functions-body body paramMap vecName)
     (match body
-        [(Var x) (dict-ref paramMap x)]
-        [(Let x e1 body) (Let (limit-functions-body x paramMap) (limit-functions-body e1 paramMap) (limit-functions-body body paramMap))]
-        [(If cond e1 e2) (If (limit-functions-body cond paramMap) (limit-functions-body e1 paramMap) (limit-functions-body e2 paramMap))]
-        [(Prim op es) (Prim op (for/list ([e1 es]) (limit-functions-body e1 paramMap)))]
-        [(SetBang v exp) (SetBang v (limit-functions-body exp paramMap))]
-        [(Begin es exp) (Begin (for/list ([body es]) (limit-functions-body body paramMap)) (limit-functions-body exp paramMap))]
-        [(WhileLoop exp1 exp2) (WhileLoop (limit-functions-body exp1 paramMap) (limit-functions-body exp2) paramMap)]
-        [(HasType exp type) (HasType (limit-functions-body exp paramMap) type)]
-        [(Apply fn es) (Apply (limit-functions-body fn paramMap) 
-                              (limit-functions-fnCall es paramMap)
+        [(Var x) (if (dict-ref paramMap x #f) 
+            (if (Var? (dict-ref paramMap x)) (dict-ref paramMap x) (Prim 'vector-ref (list (Var vecName) (dict-ref paramMap x))))
+            (Var x)
+        )]
+        [(Let x e1 body) (Let (limit-functions-body x paramMap vecName) (limit-functions-body e1 paramMap vecName) (limit-functions-body body paramMap vecName))]
+        [(If cond e1 e2) (If (limit-functions-body cond paramMap vecName) (limit-functions-body e1 paramMap vecName) (limit-functions-body e2 paramMap vecName))]
+        [(Prim op es) (Prim op (for/list ([e1 es]) (limit-functions-body e1 paramMap vecName)))]
+        [(SetBang v exp) (SetBang v (limit-functions-body exp paramMap vecName))]
+        [(Begin es exp) (Begin (for/list ([body es]) (limit-functions-body body paramMap vecName)) (limit-functions-body exp paramMap vecName))]
+        [(WhileLoop exp1 exp2) (WhileLoop (limit-functions-body exp1 paramMap vecName) (limit-functions-body exp2) paramMap vecName)]
+        [(HasType exp type) (HasType (limit-functions-body exp paramMap vecName) type)]
+        [(Apply fn es) (Apply (limit-functions-body fn paramMap vecName) 
+                              (limit-functions-fnCall es paramMap vecName)
                         )
         ]
         [(FunRef id n) (FunRef id n)]
@@ -263,7 +279,7 @@
     (define vecName (gensym 'tup))
     (define paramMap (limit-functions-map params vecName))
     (define newParams (limit-functions-params params vecName))
-    (define newBody (limit-functions-body (Def-body df) paramMap))
+    (define newBody (limit-functions-body (Def-body df) paramMap vecName))
     (Def (Def-name df) newParams (Def-rty df) (Def-info df) newBody)
 )
 
@@ -390,9 +406,9 @@
 (define (rco_atm_applyHelper args fnName [newArgs '()])
     (match args
         ['() (Apply fnName newArgs)]
-        [(cons a c) (define tmp (gensym 'as))
+        [(cons a c) (define tmp (gensym))
                 (if (rco_atm a) (rco_atm_applyHelper c fnName (append newArgs (list a))) 
-                    (Let tmp a (rco_atm_applyHelper c fnName (append newArgs (list (Var tmp)))))
+                    (Let tmp (rco_exp a) (rco_atm_applyHelper c fnName (append newArgs (list (Var tmp)))))
                 )
         ]
     )
@@ -477,7 +493,7 @@
         [(FunRef id n) (FunRef id n)]
         [(Apply fn es) (define fnName (gensym 'fName))
             (if (rco_atm fn) (rco_atm_applyHelper es fn) 
-                (Let fnName fn (rco_exp (Apply (Var fnName) es)))
+                (Let fnName (rco_exp fn) (rco_exp (Apply (Var fnName) es)))
             )
         ]
         [(Def name params rty info body) (Def name params rty info (rco_exp body))]
@@ -553,7 +569,7 @@
             (explicate_effect (Begin es (Void)) (explicate_pred exp thnBlock elsBlock))]
         [(Apply fn es) 
             (define vr (gensym))
-            (Seq (Assign (Call fn es) vr) (IfStmt (Prim 'eq? (list (Var vr) (Bool #t))) 
+            (Seq (Assign (Var vr) (Call fn es)) (IfStmt (Prim 'eq? (list (Var vr) (Bool #t))) 
                                            (create_block thn) (create_block els)
                                      )
             )
@@ -921,8 +937,8 @@
         [(Instr 'leaq es) (list-to-set (list (car es)))]
         [(Jmp _) (set (Reg 'rax) (Reg 'rsp))]
         [(Callq fnName n)
-            (if (<= n 6) (list->set (take argument-registers n))
-                        (list->set (take argument-registers 6))
+            (if (<= n 6) (list->set (take (set-to-list argument-registers) n))
+                        (list->set (take (set-to-list argument-registers) 6))
             )
         ]
         [(IndirectCallq fnName n)
@@ -942,7 +958,7 @@
         [(Instr 'addq es) (list->set (cdr es))]
         [(Instr 'subq es) (list->set (cdr es))]
         [(Instr 'negq es) (list->set es)]
-        [(Instr 'leaq es) (list->set es)]
+        [(Instr 'leaq es) (list->set (cdr es))]
         [(Callq _ _) caller-saved-registers]
         [(IndirectCallq fnName n) caller-saved-registers]
         [(TailJmp fnName n) caller-saved-registers]
@@ -989,7 +1005,6 @@
     (define live-after-list (get-live-after instrs initialSet))
     (dict-set! live-after-sets label live-after-list)
     (car live-after-list)
-
 )
 
 (define (analyze_dataflow G transfer bottom join e fnName)
@@ -1068,7 +1083,7 @@
             (match curInstr
                 [(Instr 'movq (list src dest)) (when (not (eq? src v)) (add-edge! interference-graph v d))]
                 [(Instr 'movzbq (list src dest)) (when (not (eq? src v)) (add-edge! interference-graph v d))]
-                [(Callq fnName n) 
+                [(Callq fnName n)
                     (cond 
                         [(and (not (set-member? (list->set allRegisters) v)) (ptr-bool? (dict-ref local-vars (Var-name v)))) 
                             (for ([reg allRegisters]) 
@@ -1346,7 +1361,6 @@
     )
 )
 
-
 (define (used-callee varColors [usedCallee '()]) 
     (match varColors
         ['() (list->set usedCallee)]
@@ -1374,6 +1388,7 @@
 (define (allocate-registers-def df)
     (match df
         [(Def nm prm rty info body)
+            (set! local-vars (dict-ref info 'locals-types))
             (define graph (dict-ref info 'conflicts))
             (define varColors (allocate-registers-helper (sequence->list (in-vertices graph)) graph))
             (define numSpilledVariables (num-spilled-var varColors))
@@ -1424,8 +1439,6 @@
                 )
         ]
         [(TailJmp fnName n)
-            (displayln "fnName")
-            (displayln fnName)
             (list
                 (Instr 'movq (list fnName (Reg 'rax)))
                 (TailJmp (Reg 'rax) n)
@@ -1598,10 +1611,10 @@
      ("uncover get!", uncover-get!, interp-Lfun, type-check-Lfun)
      ("remove complex opera*", remove-complex-opera*, interp-Lfun, type-check-Lfun)
      ("explicate control", explicate_control, interp-Cfun, type-check-Cfun)
-    ;;;  ("instruction selection", select-instructions, interp-x86-3)
-    ;;;  ("uncover live", uncover-live, interp-x86-3)
-    ;;;  ("interference graph", build-interference, interp-x86-3)
-    ;;;  ("allocate registers", allocate-registers, interp-x86-3)
-    ;;;  ("patch instructions", patch-instructions, interp-x86-3)
-    ;;;  ("prelude-and-conclusion", prelude-and-conclusion, interp-x86-3)
+     ("instruction selection", select-instructions, interp-x86-3)
+     ("uncover live", uncover-live, interp-x86-3)
+     ("interference graph", build-interference, interp-x86-3)
+     ("allocate registers", allocate-registers, interp-x86-3)
+     ("patch instructions", patch-instructions, interp-x86-3)
+     ("prelude-and-conclusion", prelude-and-conclusion, interp-x86-3)
      ))
