@@ -7,9 +7,11 @@
 (require "interp-Lif.rkt")
 (require "interp-Lwhile.rkt")
 (require "interp-Lvec.rkt")
+(require "interp-Lfun.rkt")
 (require "type-check-Lif.rkt")
 (require "type-check-Lwhile.rkt")
 (require "type-check-Lvec.rkt")
+(require "type-check-Lfun.rkt")
 (require "interp.rkt")
 (require "compiler.rkt")
 ;; (debug-level 1)
@@ -31,8 +33,11 @@
         all-tests)))
 
 (debug-level 1)
-;;; (interp-tests "cond" type-check-Lif compiler-passes interp-Lif "cond_test" (tests-for "cond"))
+;;; (interp-tests "functions" type-check-Lfun compiler-passes interp-Lfun "functions_test" (tests-for "functions"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "vectors" type-check-Lvec compiler-passes "vectors_test" (tests-for "vectors"))
+
+;;; (interp-tests "functions" type-check-Lfun compiler-passes interp-Lfun "functions_r4" (tests-for "functions"))
+
+(compiler-tests "functions" type-check-Lfun compiler-passes "functions_r4" (tests-for "functions"))
