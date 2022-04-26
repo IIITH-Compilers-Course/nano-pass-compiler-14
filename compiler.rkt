@@ -665,12 +665,12 @@
   )
 )
 
-(define (select-instructions-statement stm)
+(define (select-instructions-statement stm fnName)
     (match stm
         ['() '()]
-        [(Seq (Prim 'read '()) t*) (append (list (Callq 'read_int 0)) (select-instructions-statement t*))]
-        [(Seq (Assign var exp) t*) (append (select-instructions-assignment exp var) (select-instructions-statement t*))]
-        [(Return exp) (append (select-instructions-assignment exp (Reg 'rax)) (list (Jmp 'conclusion)))]
+        [(Seq (Prim 'read '()) t*) (append (list (Callq 'read_int 0)) (select-instructions-statement t* fnName))]
+        [(Seq (Assign var exp) t*) (append (select-instructions-assignment exp var) (select-instructions-statement t* fnName))]
+        [(Return exp) (append (select-instructions-assignment exp (Reg 'rax)) (list (Jmp (symbol-append fnName 'conclusion))))]
         [(Goto lbl) (list (Jmp lbl))]
         [(IfStmt (Prim cmp (list e1 e2)) (Goto l1) (Goto l2)) 
                  (list (Instr 'cmpq (list (select-instructions-atomic e2) (select-instructions-atomic e1)))
@@ -683,7 +683,7 @@
                 (append (list (Instr 'movq (list vecName (Reg 'r11)))
                               (Instr 'movq (list (select-instructions-atomic rhs) (Deref 'r11 offset)))
                         ) 
-                        (select-instructions-statement t*)
+                        (select-instructions-statement t* fnName)
                 )
         ]
         [(Seq (Collect bytes) t*) 
@@ -693,7 +693,7 @@
                        ;;;   TODO: argument of collect
                       (Callq 'collect 2)
                 )
-                (select-instructions-statement t*)
+                (select-instructions-statement t* fnName)
             )
         ]
         [(TailCall fnName es) (append
@@ -834,7 +834,7 @@
     (define instrBlocks (make-hash))
     (define body (Def-body df))
     (define prms (Def-param* df))
-    (dict-for-each body (lambda (lbl instrs) (dict-set! instrBlocks lbl (Block '() (select-instructions-statement instrs)))))
+    (dict-for-each body (lambda (lbl instrs) (dict-set! instrBlocks lbl (Block '() (select-instructions-statement instrs (Def-name df))))))
 
     (define movRegArg (select-instructions-movRegArg prms))
     (define startLbl (symbol-append (Def-name df) 'start))
@@ -992,12 +992,12 @@
 
 )
 
-(define (analyze_dataflow G transfer bottom join e)
+(define (analyze_dataflow G transfer bottom join e fnName)
     (define mapping (make-hash))
     (for ([v (in-vertices G)])
         (dict-set! mapping v bottom))
     (define worklist (make-queue))
-    (for ([v (in-vertices G)]  #:when (not (eq? v 'conclusion))) 
+    (for ([v (in-vertices G)]  #:when (not (eq? v (symbol-append fnName 'conclusion)))) 
         (enqueue! worklist v))
     (define trans-G (transpose G))
     (while (not (queue-empty? worklist))
@@ -1019,6 +1019,7 @@
 )
 
 (define (uncover-live-def df)
+    (define fnName (Def-name df))
     (define body (Def-body df)) 
     (set! label-live (make-hash))
     (set! live-after-sets (make-hash))
@@ -1035,8 +1036,8 @@
 
     (define graphTransp (transpose graph))
     (define topoOrder (tsort graphTransp))
-    (dict-set! label-live 'conclusion (set (Reg 'rax) (Reg 'rsp)))
-    (analyze_dataflow graphTransp uncover-live-block (set) set-union body)
+    (dict-set! label-live (symbol-append fnName 'conclusion) (set (Reg 'rax) (Reg 'rsp)))
+    (analyze_dataflow graphTransp uncover-live-block (set) set-union body fnName)
 
     (dict-for-each body 
         (lambda (lbl block) 
@@ -1216,6 +1217,10 @@
 (define (assign-homes-mapvars varmap stm usedCalleeNum)
     (match stm
         [(Instr op args) (Instr op (map (lambda (x) (assign-homes-convert x varmap usedCalleeNum)) args))]
+        [(IndirectCallq fnName n)
+            (IndirectCallq (assign-homes-convert fnName varmap usedCalleeNum) n)]
+        [(TailJmp fnName n)
+            (TailJmp (assign-homes-convert fnName varmap usedCalleeNum) n)]
         [_ stm]
     )
 )
@@ -1419,6 +1424,8 @@
                 )
         ]
         [(TailJmp fnName n)
+            (displayln "fnName")
+            (displayln fnName)
             (list
                 (Instr 'movq (list fnName (Reg 'rax)))
                 (TailJmp (Reg 'rax) n)
@@ -1522,34 +1529,34 @@
 
         (dict-set! body nm 
             (Block info (append (list (Instr 'pushq (list (Reg 'rbp)))) 
-                                                (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))) 
-                                                (push-calle-saved (dict-ref info 'used_callee)) 
-                                                (list (Instr 'subq (list (Imm A) (Reg 'rsp))))
-                                                
-                                                (if (eq? nm 'main)
-                                                    (append 
-                                                        (list (Instr 'movq (list (Imm 16384) (Reg 'rdi))))
-                                                        (list (Instr 'movq (list (Imm 16384) (Reg 'rsi))))
-                                                        (list (Callq 'initialize 2))
-                                                        (list (Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15))))
-                                                    )
-                                                    '()
-                                                )
+                                (list (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))) 
+                                (push-calle-saved (dict-ref info 'used_callee)) 
+                                (list (Instr 'subq (list (Imm A) (Reg 'rsp))))
+                                
+                                (if (eq? nm 'main)
+                                    (append 
+                                        (list (Instr 'movq (list (Imm 16384) (Reg 'rdi))))
+                                        (list (Instr 'movq (list (Imm 16384) (Reg 'rsi))))
+                                        (list (Callq 'initialize 2))
+                                        (list (Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15))))
+                                    )
+                                    '()
+                                )
 
-                                                (zeroOutRootStack (dict-ref info 'num-root-spills))
-                                                (list (Instr 'addq (list (Imm R) (Reg 'r15))))
-                                                (list (Jmp (symbol-append nm 'start)))
+                                (zeroOutRootStack (dict-ref info 'num-root-spills))
+                                (list (Instr 'addq (list (Imm R) (Reg 'r15))))
+                                (list (Jmp (symbol-append nm 'start)))
                         )
             )
         )
         (dict-set! body (symbol-append nm 'conclusion)
-                        (Block info (append  (list  (Instr 'subq (list (Imm R) (Reg 'r15))))
-                                                    (list (Instr 'addq (list (Imm A) (Reg 'rsp))))
-                                                    (pop-calle-saved (dict-ref info 'used_callee))
-                                                    (list (Instr 'popq (list (Reg 'rbp))))
-                                                    (list (Retq))
-                                            )
-                                )
+                        (Block info (append (list  (Instr 'subq (list (Imm R) (Reg 'r15))))
+                                            (list (Instr 'addq (list (Imm A) (Reg 'rsp))))
+                                            (pop-calle-saved (dict-ref info 'used_callee))
+                                            (list (Instr 'popq (list (Reg 'rbp))))
+                                            (list (Retq))
+                                    )
+                        )
         )
 
         (Def nm prm rty info body)]
@@ -1560,9 +1567,19 @@
 (define (prelude-and-conclusion p)
     (match p
         [(ProgramDefs info dfList) 
-            (ProgramDefs info 
-                (for/list ([df dfList]) (prelude-and-conclusion-def df))
+            (define updatedDfList (for/list ([df dfList]) (prelude-and-conclusion-def df)))
+
+            (define finalBody '())            
+            (for/list ([df updatedDfList])
+                (define body (Def-body df))
+                (dict-for-each body
+                    (lambda (lbl instrs)
+                        (set! finalBody (append finalBody (list (cons lbl (dict-ref body lbl)))))
+                    )
+                )
             )
+
+            (X86Program info finalBody)
         ] 
     )  
 )
