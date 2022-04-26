@@ -234,8 +234,10 @@
 (define (limit-functions-prepVec params paramMap vecName [ind 0])
     (match params
         ['() '()]
-        [(cons a c) (append (list (if (not (dict-ref paramMap (Var-name a) #f)) a (Prim 'vector-ref (list (Var vecName) (dict-ref paramMap (Var-name a)))))) 
-                            (limit-functions-prepVec c paramMap vecName (+ ind 1)))
+        [(cons a c)
+            (append (list (limit-functions-body a paramMap vecName)) 
+                (limit-functions-prepVec c paramMap vecName (+ ind 1))
+            )
         ]
     )
 )
